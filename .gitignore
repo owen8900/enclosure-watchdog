@@ -1,0 +1,61 @@
+# ============================================================
+#  Cabinet Guardian · 控制柜健康监测与故障诊断系统
+#  .gitignore
+# ============================================================
+
+# ---------- 编译产物 ----------
+*.o
+*.obj
+*.elf
+*.axf
+*.hex
+*.bin
+*.map
+*.lst
+*.d
+*.su
+*.crf
+*.dep
+*.lnp
+*.iex
+*.sct
+*.htm
+*.build_log.htm
+*.scvd
+*.htm
+
+# ---------- IDE / 工具链 ----------
+.vscode/
+.idea/
+*.uvguix.*
+*.uvoptx
+*.uvprojx.user
+*.launch
+DebugConfig/
+ReleaseConfig/
+JLinkLog.txt
+JLinkSettings.ini
+
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+
+# ---------- 临时文件 ----------
+*.tmp
+*.bak
+*.orig
+*.log
+Thumbs.db
+desktop.ini
+~$*
+
+# ---------- 大体积参考文件（如需另行分发） ----------
+# 正点原子官方资料包（含厂商版权，不入库）
+ref-vendor/
+
+# ---------- 工作笔记（采购、成本、比赛策略等，不公开） ----------
+notes/
