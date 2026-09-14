@@ -61,3 +61,24 @@ notes/
 
 # ---------- 厂商参考资料（含版权，另存不分发） ----------
 ref-vendor/
+
+# ============================================================
+# STM32 固件工程（Keil MDK-ARM + STM32CubeMX）  2026-09-14
+# ============================================================
+
+# Keil 编译产物（89 个文件 / 76 MB，clone 后按 F7 可完全重新生成）
+code/MDK-ARM/CabinetGuardian/
+
+# Keil 个人界面布局（窗口位置等，换台电脑就没意义）
+code/MDK-ARM/*.uvoptx
+code/MDK-ARM/*.uvguix.*
+
+# 手工备份文件
+code/MDK-ARM/*.bak
+
+# CubeMX 临时目录
+code/MXTmpFiles/
+
+# CubeMX 重新生成时的自动备份
+*_save
+*.ioc.bak
