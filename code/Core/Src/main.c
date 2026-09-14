@@ -1,4 +1,4 @@
-﻿/* USER CODE BEGIN Header */
+/* USER CODE BEGIN Header */
 /**
   ******************************************************************************
   * @file           : main.c
@@ -19,12 +19,13 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "sdmmc.h"
 #include "usart.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
-/* USER CODE BEGIN Includes */#include <string.h>
-
+/* USER CODE BEGIN Includes */
+#include <string.h>
 
 /* USER CODE END Includes */
 
@@ -44,8 +45,8 @@
 
 /* Private variables ---------------------------------------------------------*/
 
-/* USER CODE BEGIN PV */static uint32_t g_cycle = 0;
-
+/* USER CODE BEGIN PV */
+static uint32_t g_cycle = 0;
 
 /* USER CODE END PV */
 
@@ -93,6 +94,21 @@ static void uart_put_u32(uint32_t v)
     uart_puts(buf);
 }
 
+static void uart_put_hex32(uint32_t v)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    char buf[9];
+    int  i;
+
+    for (i = 7; i >= 0; i--)
+    {
+        buf[i] = hex[v & 0xFu];
+        v >>= 4;
+    }
+    buf[8] = '\0';
+    uart_puts(buf);
+}
+
 
 /* USER CODE END 0 */
 
@@ -125,6 +141,7 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USART1_UART_Init();
+  MX_SDMMC1_SD_Init();
   /* USER CODE BEGIN 2 */
     /* ---- M1: power-on self test, printed via USART1 (onboard CH340C) ---- */
     uart_puts("\r\n\r\n");
@@ -141,6 +158,43 @@ int main(void)
     uart_puts("----------------------------------------\r\n");
     uart_puts("RGB LED    : cycling RED -> GREEN -> BLUE\r\n\r\n");
 
+    /* ---- M3: SD card self test (HAL layer only, no FATFS yet) ----
+     * Prints everything needed to tell a good card from a card that is
+     * not answering, without a debugger: state, HAL error code, and the
+     * capacity worked out from the card registers.
+     * NOTE: this board has no card-detect pin, so the card must be
+     * inserted BEFORE reset -- the card is only identified at startup. */
+    {
+        HAL_SD_CardInfoTypeDef ci;
+        HAL_StatusTypeDef      st;
+
+        uart_puts("SD state   : ");
+        uart_put_u32((uint32_t)hsd1.State);
+        uart_puts("  err=0x");
+        uart_put_hex32(hsd1.ErrorCode);
+        uart_puts("\r\n");
+
+        st = HAL_SD_GetCardInfo(&hsd1, &ci);
+        if (st != HAL_OK)
+        {
+            uart_puts("SD card    : FAILED (GetCardInfo)\r\n");
+        }
+        else
+        {
+            /* BlockNbr * BlockSize overflows 32 bits for a 16 GB card,
+             * so the multiply has to be done in 64 bits. */
+            uint32_t cap_mb = (uint32_t)(((uint64_t)ci.BlockNbr * (uint64_t)ci.BlockSize)
+                                         / (1024ULL * 1024ULL));
+
+            uart_puts("SD card    : OK\r\n");
+            uart_puts("SD type    : "); uart_put_u32(ci.CardType);    uart_puts("\r\n");
+            uart_puts("SD version : "); uart_put_u32(ci.CardVersion); uart_puts("\r\n");
+            uart_puts("SD speed   : "); uart_put_u32(ci.CardSpeed);   uart_puts("\r\n");
+            uart_puts("SD blockNbr: "); uart_put_u32(ci.BlockNbr);    uart_puts("\r\n");
+            uart_puts("SD blockSz : "); uart_put_u32(ci.BlockSize);   uart_puts("\r\n");
+            uart_puts("SD capacity: "); uart_put_u32(cap_mb);         uart_puts(" MB\r\n");
+        }
+    }
 
   /* USER CODE END 2 */
 
@@ -198,12 +252,12 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
-  RCC_OscInitStruct.PLL.PLLM = 4;
-  RCC_OscInitStruct.PLL.PLLN = 480;
+  RCC_OscInitStruct.PLL.PLLM = 1;
+  RCC_OscInitStruct.PLL.PLLN = 120;
   RCC_OscInitStruct.PLL.PLLP = 2;
-  RCC_OscInitStruct.PLL.PLLQ = 2;
+  RCC_OscInitStruct.PLL.PLLQ = 5;
   RCC_OscInitStruct.PLL.PLLR = 2;
-  RCC_OscInitStruct.PLL.PLLRGE = RCC_PLL1VCIRANGE_1;
+  RCC_OscInitStruct.PLL.PLLRGE = RCC_PLL1VCIRANGE_3;
   RCC_OscInitStruct.PLL.PLLVCOSEL = RCC_PLL1VCOWIDE;
   RCC_OscInitStruct.PLL.PLLFRACN = 0;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
@@ -240,7 +294,14 @@ void SystemClock_Config(void)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
+  /* Report the failure before dying. A silent hang is the most expensive
+   * symptom to debug: no UART output, no LED, and it looks like either the
+   * board is dead or the image never got flashed. */
+  uart_puts("\r\n*** FATAL: Error_Handler() ***\r\n");
+  uart_puts("SD  err=0x"); uart_put_hex32(hsd1.ErrorCode);
+  uart_puts("  state=");   uart_put_u32((uint32_t)hsd1.State);
+  uart_puts("\r\n");
+
   __disable_irq();
   while (1)
   {
