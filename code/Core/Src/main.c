@@ -1,4 +1,4 @@
-/* USER CODE BEGIN Header */
+﻿/* USER CODE BEGIN Header */
 /**
   ******************************************************************************
   * @file           : main.c
@@ -19,6 +19,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "fatfs.h"
 #include "sdmmc.h"
 #include "usart.h"
 #include "gpio.h"
@@ -46,6 +47,14 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+/* FatFs 的对象：FATFS 自带一个 512 字节窗口，FIL 也自带一个，
+ * 两个加起来约 1.1 KB。而 main() 的栈只有 1 KB
+ * （startup_stm32h750xx.s 里 Stack_Size = 0x400）。
+ * 放栈上必定溢出，所以放成文件级静态，落到 .bss。 */
+static FATFS s_fs;
+static DIR   s_dir;
+static FIL   s_fil;
+
 static uint32_t g_cycle = 0;
 
 /* USER CODE END PV */
@@ -59,8 +68,8 @@ void SystemClock_Config(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 /* ------------------------------------------------------------------
- * Minimal UART helpers.  We deliberately avoid printf() to keep the
- * standard-library formatting code out of the 128 KB internal flash.
+ * 极简串口输出助手。刻意不用 printf()：标准库的格式化代码会往
+ * 128 KB 的片内 Flash 里塞进好几 KB，不值得。
  * ------------------------------------------------------------------ */
 static void uart_puts(const char *s)
 {
@@ -142,8 +151,9 @@ int main(void)
   MX_GPIO_Init();
   MX_USART1_UART_Init();
   MX_SDMMC1_SD_Init();
+  MX_FATFS_Init();
   /* USER CODE BEGIN 2 */
-    /* ---- M1: power-on self test, printed via USART1 (onboard CH340C) ---- */
+    /* ---- M1：上电自检，通过 USART1 打印（板载 CH340C）---- */
     uart_puts("\r\n\r\n");
     uart_puts("========================================\r\n");
     uart_puts("  Cabinet Guardian - Cabinet Health Monitor\r\n");
@@ -158,43 +168,192 @@ int main(void)
     uart_puts("----------------------------------------\r\n");
     uart_puts("RGB LED    : cycling RED -> GREEN -> BLUE\r\n\r\n");
 
-    /* ---- M3: SD card self test (HAL layer only, no FATFS yet) ----
-     * Prints everything needed to tell a good card from a card that is
-     * not answering, without a debugger: state, HAL error code, and the
-     * capacity worked out from the card registers.
-     * NOTE: this board has no card-detect pin, so the card must be
-     * inserted BEFORE reset -- the card is only identified at startup. */
+    /* ---- M3：SD 卡 + FATFS -----------------------------------------
+     * 下面这个顺序不是排版问题，是被 CubeMX 的两个行为逼出来的：
+     *
+     * 1) 一旦在 CubeMX 里使能 FATFS，它会把 HAL_SD_Init() 从
+     *    MX_SDMMC1_SD_Init() 里删掉 —— 那个函数只剩填 Init 结构体。
+     *    卡的识别改由 FATFS 驱动里的 BSP_SD_Init() 负责，
+     *    只在第一次 f_mount() 时执行。所以在挂载之前读卡信息，
+     *    拿到的全是 0（句柄在 .bss 里，State 是 RESET）。
+     *    必须「先挂载，再打印卡信息」。
+     *
+     * 2) HAL_SD_GetCardInfo() 只拷贝 CardType / CardVersion / Class /
+     *    RelCardAdd / BlockNbr / BlockSize / LogBlockNbr / LogBlockSize
+     *    这 8 个字段，它不填 CardSpeed。打印 CardSpeed 读到的是
+     *    未初始化的栈内存（实测打出一个像地址的天文数字），
+     *    所以这里不打印它。 */
     {
         HAL_SD_CardInfoTypeDef ci;
-        HAL_StatusTypeDef      st;
+        FRESULT fr;
+        DWORD   free_clusters = 0;
+        FATFS  *fsp = &s_fs;
 
-        uart_puts("SD state   : ");
-        uart_put_u32((uint32_t)hsd1.State);
-        uart_puts("  err=0x");
-        uart_put_hex32(hsd1.ErrorCode);
-        uart_puts("\r\n");
-
-        st = HAL_SD_GetCardInfo(&hsd1, &ci);
-        if (st != HAL_OK)
+        /* ---- 第 1 步：挂载。卡就是在这一步被识别出来的 ---- */
+        fr = f_mount(&s_fs, "0:", 1);
+        uart_puts("FATFS mount: ");
+        if (fr != FR_OK)
         {
-            uart_puts("SD card    : FAILED (GetCardInfo)\r\n");
+            uart_puts("FAILED  fr=");
+            uart_put_u32((uint32_t)fr);
+            uart_puts("   (13=FR_NO_FILESYSTEM, 3=FR_NOT_READY)\r\n");
+
+            /* HAL 层可能还留着真正的原因 */
+            uart_puts("raw HAL    : state=");
+            uart_put_u32((uint32_t)hsd1.State);
+            uart_puts("  err=0x");
+            uart_put_hex32(hsd1.ErrorCode);
+            uart_puts("\r\n");
         }
         else
         {
-            /* BlockNbr * BlockSize overflows 32 bits for a 16 GB card,
-             * so the multiply has to be done in 64 bits. */
-            uint32_t cap_mb = (uint32_t)(((uint64_t)ci.BlockNbr * (uint64_t)ci.BlockSize)
-                                         / (1024ULL * 1024ULL));
+            uart_puts("OK\r\n");
 
-            uart_puts("SD card    : OK\r\n");
-            uart_puts("SD type    : "); uart_put_u32(ci.CardType);    uart_puts("\r\n");
-            uart_puts("SD version : "); uart_put_u32(ci.CardVersion); uart_puts("\r\n");
-            uart_puts("SD speed   : "); uart_put_u32(ci.CardSpeed);   uart_puts("\r\n");
-            uart_puts("SD blockNbr: "); uart_put_u32(ci.BlockNbr);    uart_puts("\r\n");
-            uart_puts("SD blockSz : "); uart_put_u32(ci.BlockSize);   uart_puts("\r\n");
-            uart_puts("SD capacity: "); uart_put_u32(cap_mb);         uart_puts(" MB\r\n");
+            /* ---- 第 2 步：卡信息 —— 只有第 1 步成功之后才有意义 ---- */
+            if (HAL_SD_GetCardInfo(&hsd1, &ci) != HAL_OK)
+            {
+                uart_puts("SD card    : GetCardInfo FAILED");
+                uart_puts("\r\n");
+            }
+            else
+            {
+                /* BlockNbr 乘 BlockSize 在 16GB 卡上会超过 32 位，
+                 * 所以这个乘法必须用 64 位做。 */
+                uint32_t cap_mb = (uint32_t)(((uint64_t)ci.BlockNbr *
+                                              (uint64_t)ci.BlockSize)
+                                             / (1024ULL * 1024ULL));
+                uart_puts("SD card    : OK\r\n");
+                uart_puts("SD type    : ");
+                uart_put_u32(ci.CardType);    uart_puts("\r\n");
+                uart_puts("SD version : ");
+                uart_put_u32(ci.CardVersion); uart_puts("\r\n");
+                /* 这里打出来的 Class 其实是 CSD 寄存器的 CCC 字段
+                 * （Card Command Classes，卡支持的命令类位图）：
+                 * HAL 取的是 RESP2 >> 20，也就是 CSD[95:84]。
+                 * 0x5B5 = 支持命令类 0/2/4/5/7/8/10，SD 存储卡的标准值。
+                 * 注意它跟"速度等级"不是一回事，别混。 */
+                uart_puts("SD class   : ");
+                uart_put_u32(ci.Class);       uart_puts("\r\n");
+                uart_puts("SD blockNbr: ");
+                uart_put_u32(ci.BlockNbr);    uart_puts("\r\n");
+                uart_puts("SD blockSz : ");
+                uart_put_u32(ci.BlockSize);   uart_puts("\r\n");
+                uart_puts("SD capacity: ");
+                uart_put_u32(cap_mb);         uart_puts(" MB"); uart_puts("\r\n");
+            }
+
+            /* ---- 第 3 步：剩余空间 —— 顺带证明 f_getfree 能用 ---- */
+            fr = f_getfree("0:", &free_clusters, &fsp);
+            if (fr == FR_OK)
+            {
+                /* free_clusters 的单位是簇；一簇等于 s_fs.csize 个扇区，
+                 * 每个扇区 512 字节。 */
+                uint32_t free_mb = (uint32_t)(((uint64_t)free_clusters *
+                                              (uint64_t)s_fs.csize * 512ULL)
+                                             / (1024ULL * 1024ULL));
+                uart_puts("FATFS free : ");
+                uart_put_u32(free_mb);
+                uart_puts(" MB   (cluster = ");
+                uart_put_u32((uint32_t)s_fs.csize);
+                uart_puts(" sectors)\r\n");
+            }
+            else
+            {
+                uart_puts("FATFS free : FAILED  fr=");
+                uart_put_u32((uint32_t)fr);
+                uart_puts("\r\n");
+            }
+
+            /* ---- 第 4 步：列出根目录 ---- */
+            {
+                FILINFO  fno;
+                uint32_t n = 0;
+
+                fr = f_opendir(&s_dir, "0:/");
+                if (fr != FR_OK)
+                {
+                    uart_puts("FATFS dir  : FAILED  fr=");
+                    uart_put_u32((uint32_t)fr);
+                    uart_puts("\r\n");
+                }
+                else
+                {
+                    uart_puts("FATFS dir  :\r\n");
+                    for (;;)
+                    {
+                        fr = f_readdir(&s_dir, &fno);
+                        if (fr != FR_OK || fno.fname[0] == 0) break;
+                        uart_puts("  ");
+                        if (fno.fattrib & AM_DIR) uart_puts("[DIR ] ");
+                        else                      uart_puts("[FILE] ");
+                        uart_puts(fno.fname);
+                        uart_puts("\r\n");
+                        n++;
+                    }
+                    f_closedir(&s_dir);
+                    uart_puts("FATFS dir  : ");
+                    uart_put_u32(n);
+                    uart_puts(" entries\r\n");
+                }
+            }
+
+            /* ---- 第 5 步：写一个文件，读回来逐字节比对 ---------------
+             * 不需要读卡器：固件自己验证自己的写入 —— 写完再读回来
+             * 和原文比对。 */
+            {
+                UINT bw = 0, br = 0;
+                static const char LINE[] = "Cabinet Guardian FATFS self test\r\n";
+                char rd[sizeof(LINE)];
+
+                fr = f_open(&s_fil, "0:/CG_TEST.TXT", FA_CREATE_ALWAYS | FA_WRITE);
+                if (fr != FR_OK)
+                {
+                    uart_puts("FATFS write: FAILED (open) fr=");
+                    uart_put_u32((uint32_t)fr);
+                    uart_puts("\r\n");
+                }
+                else
+                {
+                    fr = f_write(&s_fil, LINE, sizeof(LINE) - 1, &bw);
+                    if (fr == FR_OK) fr = f_sync(&s_fil);   /* 立刻落盘，不等到 close */
+                    f_close(&s_fil);
+
+                    if (fr != FR_OK || bw != sizeof(LINE) - 1)
+                    {
+                        uart_puts("FATFS write: FAILED  fr=");
+                        uart_put_u32((uint32_t)fr);
+                        uart_puts("  wrote=");
+                        uart_put_u32((uint32_t)bw);
+                        uart_puts("\r\n");
+                    }
+                    else
+                    {
+                        uart_puts("FATFS write: ");
+                        uart_put_u32((uint32_t)bw);
+                        uart_puts(" bytes -> CG_TEST.TXT\r\n");
+
+                        fr = f_open(&s_fil, "0:/CG_TEST.TXT", FA_READ);
+                        if (fr == FR_OK)
+                        {
+                            fr = f_read(&s_fil, rd, sizeof(LINE) - 1, &br);
+                            f_close(&s_fil);
+                            rd[sizeof(LINE) - 1] = 0;
+                            if (fr == FR_OK && br == sizeof(LINE) - 1 &&
+                                memcmp(rd, LINE, sizeof(LINE) - 1) == 0)
+                            {
+                                uart_puts("FATFS read : OK, content matches\r\n");
+                            }
+                            else
+                            {
+                                uart_puts("FATFS read : MISMATCH\r\n");
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
+
 
   /* USER CODE END 2 */
 
@@ -205,20 +364,20 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	/* ---- M2: RGB LED cycling (active-low: RESET = ON) ---- */
-	HAL_GPIO_WritePin(LED_R_GPIO_Port, LED_R_Pin, GPIO_PIN_RESET);  /* RED   ON  */
+	/* ---- M2：RGB 三色轮闪（低电平点亮：写 RESET 就是亮）---- */
+	HAL_GPIO_WritePin(LED_R_GPIO_Port, LED_R_Pin, GPIO_PIN_RESET);  /* 红 亮 */
 	HAL_Delay(300);
-	HAL_GPIO_WritePin(LED_R_GPIO_Port, LED_R_Pin, GPIO_PIN_SET);    /* RED   OFF */
+	HAL_GPIO_WritePin(LED_R_GPIO_Port, LED_R_Pin, GPIO_PIN_SET);    /* 红 灭 */
 
-	HAL_GPIO_WritePin(LED_G_GPIO_Port, LED_G_Pin, GPIO_PIN_RESET);  /* GREEN ON  */
+	HAL_GPIO_WritePin(LED_G_GPIO_Port, LED_G_Pin, GPIO_PIN_RESET);  /* 绿 亮 */
 	HAL_Delay(300);
-	HAL_GPIO_WritePin(LED_G_GPIO_Port, LED_G_Pin, GPIO_PIN_SET);    /* GREEN OFF */
+	HAL_GPIO_WritePin(LED_G_GPIO_Port, LED_G_Pin, GPIO_PIN_SET);    /* 绿 灭 */
 
-	HAL_GPIO_WritePin(LED_B_GPIO_Port, LED_B_Pin, GPIO_PIN_RESET);  /* BLUE  ON  */
+	HAL_GPIO_WritePin(LED_B_GPIO_Port, LED_B_Pin, GPIO_PIN_RESET);  /* 蓝 亮 */
 	HAL_Delay(300);
-	HAL_GPIO_WritePin(LED_B_GPIO_Port, LED_B_Pin, GPIO_PIN_SET);    /* BLUE  OFF */
+	HAL_GPIO_WritePin(LED_B_GPIO_Port, LED_B_Pin, GPIO_PIN_SET);    /* 蓝 灭 */
 
-	/* ---- heartbeat: one line per full RGB cycle ---- */
+	/* ---- 心跳：每完成一整轮 RGB 打印一行 ---- */
 	g_cycle++;
 	uart_puts("cycle ");
 	uart_put_u32((uint32_t)g_cycle);
@@ -294,9 +453,9 @@ void SystemClock_Config(void)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-  /* Report the failure before dying. A silent hang is the most expensive
-   * symptom to debug: no UART output, no LED, and it looks like either the
-   * board is dead or the image never got flashed. */
+  /* 死之前先把失败原因打出来。静默死等是最贵的一种现象：
+   * 串口没有输出、灯也不闪，看着像板子坏了或者固件根本没烧进去。
+   * 所以这里改成先打印，再 __disable_irq()。 */
   uart_puts("\r\n*** FATAL: Error_Handler() ***\r\n");
   uart_puts("SD  err=0x"); uart_put_hex32(hsd1.ErrorCode);
   uart_puts("  state=");   uart_put_u32((uint32_t)hsd1.State);
