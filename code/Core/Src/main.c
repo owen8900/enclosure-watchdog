@@ -113,6 +113,53 @@ static void uart_put_hex32(uint32_t v)
     uart_puts(buf);
 }
 
+/* uint32 -> 十进制 ASCII，写进 out[]，返回字节数（不写结尾 '\0'）。
+ * uint32 十进制最多 10 位（4294967295），tmp 只做倒序暂存。 */
+static int u32_to_str(uint32_t v, char *out)
+{
+    char tmp[10];
+    int  i = 0;
+    int  j;
+
+    if (v == 0u)
+    {
+        out[0] = '0';
+        return 1;
+    }
+
+    while (v > 0u)
+    {
+        tmp[i] = (char)('0' + (int)(v % 10u));
+        i++;
+        v /= 10u;
+    }
+
+    for (j = 0; j < i; j++)
+    {
+        out[j] = tmp[i - 1 - j];
+    }
+
+    return i;
+}
+
+/* 拼一行心跳： "cycle <n>\r\n"，返回字节数（不含结尾 '\0'，buf 至少 20 字节）。 */
+static int build_cycle_line(uint32_t n, char *buf)
+{
+    int len;
+
+    memcpy(buf, "cycle ", 6);
+    len = 6;
+
+    len += u32_to_str(n, buf + len);
+
+    buf[len++] = '\r';
+    buf[len++] = '\n';
+    buf[len]   = '\0';
+
+    return len;
+}
+
+
 
 /* USER CODE END 0 */
 
@@ -356,11 +403,20 @@ int main(void)
 	HAL_Delay(300);
 	HAL_GPIO_WritePin(LED_B_GPIO_Port, LED_B_Pin, GPIO_PIN_SET);    /* 蓝灭 */
 
-	/* 心跳：每轮 RGB 打印一行 */
+	/* 心跳：每轮 RGB 打一行；同一行内容后面要追加进 SD 卡日志 */
 	g_cycle++;
-	uart_puts("cycle ");
-	uart_put_u32((uint32_t)g_cycle);
-	uart_puts("\r\n");
+	{
+		char line[20];                              /* 6 + 10 + 2 + 1 = 19 */
+		int  n = build_cycle_line(g_cycle, line);
+
+		uart_puts(line);                            /* 串口输出与改前逐字节相同 */
+
+		/* ---- 任务 2 后半，你来实现 ----
+		 * 把 line 的前 n 字节【追加】写进 "0:/LOG.TXT"。
+		 * 三条要求：开文件判 fr != FR_OK；每轮开/关一次；想清楚写失败怎么办。
+		 * 参考 code/Core/Src/main.c 上面 M3 那段（f_open/f_write/f_close）。
+		 */
+	}
 
   }
   /* USER CODE END 3 */
