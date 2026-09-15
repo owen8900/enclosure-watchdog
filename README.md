@@ -4,8 +4,12 @@
 加热回路电流和加热输出占空比，在本地完成故障识别和分级告警，
 通过 Modbus TCP / MQTT 对上位机通信。
 
-当前状态：硬件方案定稿，算法层已实现并在 PC 上通过 11 项验证；
-开发板尚未到货，硬件在环测试未开始。
+当前状态：开发板已到位（正点原子 MiniPro STM32H750 V1.5），固件在板上跑通到 P0b。
+已完成并实板验证：工具链（MDK + SWD 调试）、串口、GPIO、SD 卡（SDMMC1 四位 + FatFs）、
+心跳日志追加写入；算法层在 PC 上通过 11 项验证。
+下一步：ILI9341 SPI 屏驱动，随后 QSPI 启动与字库写入。
+
+固件占用：Flash 27.5 KB / 128 KB，RAM 3.6 KB。
 
 ![系统架构图](images/系统架构图.png)
 
@@ -95,18 +99,36 @@ make test
 当前结果 `PASS = 11  FAIL = 0`，覆盖八个场景：三级告警与迟滞恢复、
 四类硬件故障判据、老化趋势预警、加热闭环收敛。
 
+### 硬件在环（实板）验证
+
+| 项 | 实测结果 |
+|---|---|
+| 下载通道 | 串口下载（BOOT0 套 3V3）与 SWD（ST-Link V2，IDCODE `0x6BA02477`）均通过 |
+| 上电自检 | USART1 115200 8N1，打印 SYSCLK 480MHz / HCLK 240MHz 等时钟树参数 |
+| SD 卡 | SanDisk 16GB microSDHC，SD 2.0，blockNbr 31116288，容量 15193 MB |
+| FatFs | 挂载 / 写 / 读回逐字节比对一致；剩余 15189 MB，簇 = 64 扇区（32 KB） |
+| 心跳日志 | `0:/LOG.TXT` 追加写入，实测每轮 +9 字节（cycle 1~9）、+10 字节（cycle 10 起），即"6 + 十进制位数 + 2" |
+
+固件内置了不依赖读卡器的验收手段：开机 dump 日志文件头，每轮打印日志文件大小。
+
 ## 目录
 
 ```
 code/
-  App/          硬件无关的逻辑层，上板时直接拷入工程
-  pc_test/      PC 端验证用例
+  App/              硬件无关的算法层（PC 端 make test 验证；尚未并入 Keil 工程）
+  Core/             CubeMX 生成 + 手写初始化（main.c 内 M1/M2/M3 三段自检）
+  Drivers/          HAL 与 CMSIS
+  FATFS/            FatFs 桥接层（bsp_driver_sd / sd_diskio / ffconf）
+  Middlewares/      FatFs R0.12c 源码
+  MDK-ARM/          Keil 工程（编译产物 .hex / .map 不入库）
+  pc_test/          PC 端验证用例
+  CabinetGuardian.ioc   CubeMX 配置
 docs/
   硬件设计.md    主控资源、引脚分配、功率级电路、安全设计
   软件架构.md    CubeMX 配置、任务划分、模块接口
   测试报告.md    验证用例与实测输出
   开发计划.md    阶段划分与时间安排
-images/         架构图、流程图、接线图
+images/           架构图、流程图、接线图、引脚图
 ```
 
 ## 技术选型
@@ -118,9 +140,9 @@ images/         架构图、流程图、接线图
 | 温度 | SHT30 ×2 + DS18B20 | I2C 测环境与局部，单总线测负载本体 |
 | 电流 | INA219 | I2C，同时给出电流和负载电压，用于算 R = U/I |
 | 加热 | IRLZ44N + 10W 水泥电阻 | 低边驱动，1Hz 时间比例 |
-| 显示 | 2.4" ILI9341 SPI TFT | 带 XPT2046 电阻触摸 |
+| 显示 | 2.8" ILI9341 SPI TFT（LCDWiki MSP2807） | 带 XPT2046 电阻触摸，走 SPI1 |
 | 通信 | W5500 + ESP-01S | 有线走 Modbus TCP，无线走 MQTT |
-| 存储 | 板载 TF 卡 + FatFS | 环形日志，断网续传 |
+| 存储 | 板载 TF 卡 + FatFS | 日志落卡已实现；轮转策略与断网续传待做 |
 | 保护 | PPTC + KSD9700 + IWDG | 见 docs/硬件设计.md |
 
 ## 许可
