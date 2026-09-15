@@ -1,4 +1,4 @@
-﻿/* USER CODE BEGIN Header */
+/* USER CODE BEGIN Header */
 /**
   ******************************************************************************
   * @file           : main.c
@@ -52,6 +52,8 @@
 static FATFS s_fs;
 static DIR   s_dir;
 static FIL   s_fil;
+/* 调试用文件对象（dump / 取大小）。FIL 有 560 字节，必须静态，不能上栈。 */
+static FIL   s_dbg;
 
 static uint32_t g_cycle = 0;
 
@@ -160,6 +162,66 @@ static int build_cycle_line(uint32_t n, char *buf)
 }
 
 
+
+/* 取文件字节数（只读打开→读大小→关闭）。打不开时返回 0xFFFFFFFF。 */
+static uint32_t file_size_of(const char *path)
+{
+    FRESULT  fr;
+    uint32_t sz;
+
+    fr = f_open(&s_dbg, path, FA_READ);
+    if (fr != FR_OK)
+    {
+        return 0xFFFFFFFFu;
+    }
+    sz = (uint32_t)f_size(&s_dbg);
+    f_close(&s_dbg);
+
+    return sz;
+}
+
+/* 把文件开头 max 字节从串口 dump 出来 —— 手边没读卡器时的替代验证手段。
+ * 用 HAL_UART_Transmit 定长发，不走 uart_puts：读回来的数据没有结尾 '\0'。 */
+static void file_dump_head(const char *path, uint32_t max)
+{
+    FRESULT  fr;
+    UINT     br;
+    uint32_t total = 0;
+    uint32_t left;
+    UINT     want;
+    char     tmp[64];
+
+    fr = f_open(&s_dbg, path, FA_READ);
+    if (fr != FR_OK)
+    {
+        uart_puts("--- "); uart_puts(path);
+        uart_puts(" : open FAILED fr="); uart_put_u32((uint32_t)fr); uart_puts("\r\n");
+        return;
+    }
+
+    uart_puts("--- "); uart_puts(path); uart_puts(" size=");
+    uart_put_u32((uint32_t)f_size(&s_dbg));
+    uart_puts(" B, head ---\r\n");
+
+    while (total < max)
+    {
+        left = max - total;
+        want = (left < (uint32_t)sizeof(tmp)) ? (UINT)left : (UINT)sizeof(tmp);
+
+        br = 0;
+        fr = f_read(&s_dbg, tmp, want, &br);
+        if (fr != FR_OK || br == 0)
+        {
+            break;
+        }
+        HAL_UART_Transmit(&huart1, (uint8_t *)tmp, (uint16_t)br, 1000);
+        total += br;
+    }
+
+    uart_puts("\r\n--- dump end, "); uart_put_u32(total); uart_puts(" B shown ---\r\n");
+
+    f_close(&s_dbg);
+}
 
 /* USER CODE END 0 */
 
@@ -377,6 +439,10 @@ int main(void)
                     }
                 }
             }
+
+            /* 6. 日志文件开头 dump 一次：验证「上一轮跑完，卡里到底存了什么」。
+             * 没读卡器时就看这里。 */
+            file_dump_head("0:/LOG.TXT", 200);
         }
     }
 
@@ -411,11 +477,40 @@ int main(void)
 
 		uart_puts(line);                            /* 串口输出与改前逐字节相同 */
 
-		/* ---- 任务 2 后半，你来实现 ----
-		 * 把 line 的前 n 字节【追加】写进 "0:/LOG.TXT"。
-		 * 三条要求：开文件判 fr != FR_OK；每轮开/关一次；想清楚写失败怎么办。
-		 * 参考 code/Core/Src/main.c 上面 M3 那段（f_open/f_write/f_close）。
-		 */
+	
+		{
+			FRESULT fr;
+			UINT    bw = 0;
+
+			fr = f_open(&s_fil, "0:/LOG.TXT", FA_WRITE | FA_OPEN_APPEND);   
+			if (fr != FR_OK)
+			{
+
+
+                    uart_puts("FATFS write: FAILED (open) fr=");
+                    uart_put_u32((uint32_t)fr);
+                    uart_puts("\r\n ");
+			}
+			else
+			{
+				fr = f_write(&s_fil, line, n, &bw);      
+				if (fr != FR_OK || bw != n)             
+				{
+		
+                    uart_puts("FATFS write: FAILED  fr=");
+                    uart_put_u32((uint32_t)fr);
+                    uart_puts("  wrote=");
+                    uart_put_u32((uint32_t)bw);
+                    uart_puts("\r\n ");
+				}
+				f_close(&s_fil);                            
+			}
+		}
+
+		/* 调试：日志文件当前大小。追加 → 每轮变大；覆盖 → 一直不变。（验完可删） */
+		uart_puts("LOG size = ");
+		uart_put_u32(file_size_of("0:/LOG.TXT"));
+		uart_puts(" B\r\n");
 	}
 
   }
