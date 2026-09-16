@@ -1,4 +1,4 @@
-﻿/* USER CODE BEGIN Header */
+/* USER CODE BEGIN Header */
 /**
   ******************************************************************************
   * @file           : main.c
@@ -51,7 +51,7 @@
  *                      正式固件里改回 0 —— 它是阻塞的。
  * 2026-09-16：首次上板验收时设 20，取完标定值改回 0。 */
 #define XPT_WIRING_TEST        0
-#define XPT_SELFTEST_SECONDS   0
+#define XPT_SELFTEST_SECONDS   20
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/

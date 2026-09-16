@@ -82,3 +82,7 @@ code/MXTmpFiles/
 # CubeMX 重新生成时的自动备份
 *_save
 *.ioc.bak
+
+# Keil 5.43 从器件包拷进工程的调试配置（与 DebugConfig/ 里那份同内容，
+# 删掉会自动重建，不必入库）
+code/MDK-ARM/RTE/Device/
