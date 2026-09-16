@@ -98,7 +98,11 @@ uint8_t ili9341_init(void)
     static const uint8_t p_c1[] = { 0x00 };                                         /* Power control 2 (BT) */
     static const uint8_t p_c5[] = { 0x30, 0x30 };                                   /* VCOM control 1 */
     static const uint8_t p_c7[] = { 0xB7 };                                         /* VCOM control 2 */
-    static const uint8_t p_36[] = { 0x08 };                                         /* MADCTL：BGR，竖屏 0° */
+    /* MADCTL：BGR + MX。MX 是「列地址反序」，不开它整屏左右镜像。
+     * 厂商例程给的是 0x08（只开 BGR），那是照他们手上那块玻璃的装配方向写的；
+     * 我们这块实测打出的是镜像字（"WARNING" 变成照镜子的样子），
+     * 把 MX 位补上才是正的。上下方向是对的（MY 保持 0），别一起改。 */
+    static const uint8_t p_36[] = { 0x48 };                                         /* MADCTL：BGR + MX，竖屏 0° */
     static const uint8_t p_3a[] = { 0x55 };                                         /* 像素格式：16bit RGB565 */
     static const uint8_t p_b1[] = { 0x00, 0x1A };                                   /* Frame rate control */
     static const uint8_t p_b6[] = { 0x0A, 0xA2 };                                   /* Display function control */
