@@ -1,4 +1,4 @@
-/* USER CODE BEGIN Header */
+﻿/* USER CODE BEGIN Header */
 /**
   ******************************************************************************
   * @file           : main.c
@@ -28,6 +28,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <string.h>
+#include "ili9341.h"
 
 /* USER CODE END Includes */
 
@@ -48,12 +49,12 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-/* FatFs 对象�? 1.1KB，�?? main() 的栈只有 1KB（Stack_Size = 0x400），
- * 放栈上会溢出，所以放文件级静态�?? */
+/* FatFs 对象约 1.1KB，而 main() 的栈只有 1KB（Stack_Size = 0x400），
+ * 放栈上会溢出，所以放文件级静态。 */
 static FATFS s_fs;
 static DIR   s_dir;
 static FIL   s_fil;
-/* 调试用文件对象（dump / 取大小）。FIL �? 560 字节，必须静态，不能上栈�? */
+/* 调试用文件对象（dump / 取大小）。FIL 有 560 字节，必须静态，不能上栈。 */
 static FIL   s_dbg;
 
 static uint32_t g_cycle = 0;
@@ -68,7 +69,7 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-/* 极简串口输出：不�? printf()，省下标准库格式化代码的�? KB Flash�? */
+/* 极简串口输出：不用 printf()，省下标准库格式化代码的几 KB Flash。 */
 static void uart_puts(const char *s)
 {
     HAL_UART_Transmit(&huart1, (uint8_t *)s, (uint16_t)strlen(s), 1000);
@@ -116,8 +117,8 @@ static void uart_put_hex32(uint32_t v)
     uart_puts(buf);
 }
 
-/* uint32 -> 十进�? ASCII，写�? out[]，返回字节数（不写结�? '\0'）�??
- * uint32 十进制最�? 10 位（4294967295），tmp 只做倒序暂存�? */
+/* uint32 -> 十进制 ASCII，写进 out[]，返回字节数（不写结尾 '\0'）。
+ * uint32 十进制最多 10 位（4294967295），tmp 只做倒序暂存。 */
 static int u32_to_str(uint32_t v, char *out)
 {
     char tmp[10];
@@ -145,7 +146,7 @@ static int u32_to_str(uint32_t v, char *out)
     return i;
 }
 
-/* 拼一行心跳： "cycle <n>\r\n"，返回字节数（不含结�? '\0'，buf 至少 20 字节）�?? */
+/* 拼一行心跳： "cycle <n>\r\n"，返回字节数（不含结尾 '\0'，buf 至少 20 字节）。 */
 static int build_cycle_line(uint32_t n, char *buf)
 {
     int len;
@@ -164,7 +165,7 @@ static int build_cycle_line(uint32_t n, char *buf)
 
 
 
-/* 取文件字节数（只读打�?→读大小→关闭）。打不开时返�? 0xFFFFFFFF�? */
+/* 取文件字节数（只读打开→读大小→关闭）。打不开时返回 0xFFFFFFFF。 */
 static uint32_t file_size_of(const char *path)
 {
     FRESULT  fr;
@@ -181,8 +182,8 @@ static uint32_t file_size_of(const char *path)
     return sz;
 }
 
-/* 把文件开�? max 字节从串�? dump 出来 —�?? 手边没读卡器时的替代验证手段�?
- * �? HAL_UART_Transmit 定长发，不走 uart_puts：读回来的数据没有结�? '\0'�? */
+/* 把文件开头 max 字节从串口 dump 出来 —— 手边没读卡器时的替代验证手段。
+ * 用 HAL_UART_Transmit 定长发，不走 uart_puts：读回来的数据没有结尾 '\0'。 */
 static void file_dump_head(const char *path, uint32_t max)
 {
     FRESULT  fr;
@@ -259,7 +260,7 @@ int main(void)
   MX_FATFS_Init();
   MX_SPI2_Init();
   /* USER CODE BEGIN 2 */
-    /* M1：上电自�?（USART1，板�? CH340C�? */
+    /* M1：上电自检（USART1，板载 CH340C） */
     uart_puts("\r\n\r\n");
     uart_puts("========================================\r\n");
     uart_puts("  Cabinet Guardian - Cabinet Health Monitor\r\n");
@@ -274,18 +275,49 @@ int main(void)
     uart_puts("----------------------------------------\r\n");
     uart_puts("RGB LED    : cycling RED -> GREEN -> BLUE\r\n\r\n");
 
-    /* M3：SD �? + FATFS
-     * 顺序有讲究：CubeMX 使能 FATFS 后，不再�? sdmmc.c 初始化卡，改�? FATFS �?
-     * BSP_SD_Init() 在首�? f_mount 时识别，�?以卡信息必须挂载之后再读 —�??
-     * 读早�? hsd1 还是�? 0�?
-     * 另：HAL_SD_GetCardInfo() 不填 CardSpeed，打印它会读到未初始化的栈内存�?? */
+    /* M4：TFT 屏自检（红 -> 绿 -> 蓝 各 0.4 秒，最后清黑）
+     * 串口打印字符串保持 ASCII，避免不同终端乱码。 */
+    {
+        uint8_t lcd_err;
+
+        uart_puts("TFT LCD    : ");
+        lcd_err = ili9341_init();
+        if (lcd_err == 0)
+        {
+            uart_puts("init OK");
+        }
+        else
+        {
+            uart_puts("init ERR x");
+            uart_put_u32(lcd_err);
+        }
+        uart_puts("  SPI err total=");
+        uart_put_u32(ili9341_error_count());
+        uart_puts("\r\n");
+
+        ili9341_fill(ILI9341_RED);
+        HAL_Delay(400);
+        ili9341_fill(ILI9341_GREEN);
+        HAL_Delay(400);
+        ili9341_fill(ILI9341_BLUE);
+        HAL_Delay(400);
+        ili9341_fill(ILI9341_BLACK);
+
+        uart_puts("TFT color  : RED -> GREEN -> BLUE -> BLACK\r\n");
+    }
+
+    /* M3：SD 卡 + FATFS
+     * 顺序有讲究：CubeMX 使能 FATFS 后，不再由 sdmmc.c 初始化卡，改由 FATFS 的
+     * BSP_SD_Init() 在首次 f_mount 时识别，所以卡信息必须挂载之后再读 ——
+     * 读早了 hsd1 还是全 0。
+     * 另：HAL_SD_GetCardInfo() 不填 CardSpeed，打印它会读到未初始化的栈内存。 */
     {
         HAL_SD_CardInfoTypeDef ci;
         FRESULT fr;
         DWORD   free_clusters = 0;
         FATFS  *fsp = &s_fs;
 
-        /* 1. 挂载 —�?? 卡在这一步被识别 */
+        /* 1. 挂载 —— 卡在这一步被识别 */
         fr = f_mount(&s_fs, "0:", 1);
         uart_puts("FATFS mount: ");
         if (fr != FR_OK)
@@ -313,7 +345,7 @@ int main(void)
             }
             else
             {
-                /* 16GB 卡上 BlockNbr �? BlockSize 超过 32 位，必须�? 64 位算�? */
+                /* 16GB 卡上 BlockNbr 乘 BlockSize 超过 32 位，必须用 64 位算。 */
                 uint32_t cap_mb = (uint32_t)(((uint64_t)ci.BlockNbr *
                                               (uint64_t)ci.BlockSize)
                                              / (1024ULL * 1024ULL));
@@ -322,8 +354,8 @@ int main(void)
                 uart_put_u32(ci.CardType);    uart_puts("\r\n");
                 uart_puts("SD version : ");
                 uart_put_u32(ci.CardVersion); uart_puts("\r\n");
-                /* Class �? CSD �? CCC 命令类位图（HAL �? RESP2>>20），不是速度等级�?
-                 * 0x5B5 = 支持命令�? 0/2/4/5/7/8/10�? */
+                /* Class 是 CSD 的 CCC 命令类位图（HAL 取 RESP2>>20），不是速度等级。
+                 * 0x5B5 = 支持命令类 0/2/4/5/7/8/10。 */
                 uart_puts("SD class   : ");
                 uart_put_u32(ci.Class);       uart_puts("\r\n");
                 uart_puts("SD blockNbr: ");
@@ -338,7 +370,7 @@ int main(void)
             fr = f_getfree("0:", &free_clusters, &fsp);
             if (fr == FR_OK)
             {
-                /* free_clusters 单位是簇；一�? = s_fs.csize �? 512 字节扇区�? */
+                /* free_clusters 单位是簇；一簇 = s_fs.csize 个 512 字节扇区。 */
                 uint32_t free_mb = (uint32_t)(((uint64_t)free_clusters *
                                               (uint64_t)s_fs.csize * 512ULL)
                                              / (1024ULL * 1024ULL));
@@ -388,8 +420,8 @@ int main(void)
                 }
             }
 
-            /* 5. 写文件再读回来�?�字节比�? —�?? 固件自己验证自己的写入，
-             * 不需要读卡器�? */
+            /* 5. 写文件再读回来逐字节比对 —— 固件自己验证自己的写入，
+             * 不需要读卡器。 */
             {
                 UINT bw = 0, br = 0;
                 static const char LINE[] = "Cabinet Guardian FATFS self test\r\n";
@@ -442,8 +474,8 @@ int main(void)
                 }
             }
 
-            /* 6. 日志文件�?�? dump �?次：验证「上�?轮跑完，卡里到底存了�?么�?��??
-             * 没读卡器时就看这里�?? */
+            /* 6. 日志文件开头 dump 一次：验证「上一轮跑完，卡里到底存了什么」。
+             * 没读卡器时就看这里。 */
             file_dump_head("0:/LOG.TXT", 200);
         }
     }
@@ -458,7 +490,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	/* M2：RGB 轮闪（低电平点亮�? */
+	/* M2：RGB 轮闪（低电平点亮） */
 	HAL_GPIO_WritePin(LED_R_GPIO_Port, LED_R_Pin, GPIO_PIN_RESET);  /* 红亮 */
 	HAL_Delay(300);
 	HAL_GPIO_WritePin(LED_R_GPIO_Port, LED_R_Pin, GPIO_PIN_SET);    /* 红灭 */
@@ -471,13 +503,13 @@ int main(void)
 	HAL_Delay(300);
 	HAL_GPIO_WritePin(LED_B_GPIO_Port, LED_B_Pin, GPIO_PIN_SET);    /* 蓝灭 */
 
-	/* 心跳：每�? RGB 打一行；同一行内容后面要追加�? SD 卡日�? */
+	/* 心跳：每轮 RGB 打一行；同一行内容后面要追加进 SD 卡日志 */
 	g_cycle++;
 	{
 		char line[20];                              /* 6 + 10 + 2 + 1 = 19 */
 		int  n = build_cycle_line(g_cycle, line);
 
-		uart_puts(line);                            /* 串口输出与改前�?�字节相�? */
+		uart_puts(line);                            /* 串口输出与改前逐字节相同 */
 
 	
 		{
@@ -509,7 +541,7 @@ int main(void)
 			}
 		}
 
-		/* 调试：日志文件当前大小�?�追�? �? 每轮变大；覆�? �? �?直不变�?�（验完可删�? */
+		/* 调试：日志文件当前大小。追加 → 每轮变大；覆盖 → 一直不变。（验完可删） */
 		uart_puts("LOG size = ");
 		uart_put_u32(file_size_of("0:/LOG.TXT"));
 		uart_puts(" B\r\n");
@@ -585,7 +617,7 @@ void SystemClock_Config(void)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-  /* 死之前先打印原因：静默死等会让人误判成板子坏了或固件没烧进去�? */
+  /* 死之前先打印原因：静默死等会让人误判成板子坏了或固件没烧进去。 */
   uart_puts("\r\n*** FATAL: Error_Handler() ***\r\n");
   uart_puts("SD  err=0x"); uart_put_hex32(hsd1.ErrorCode);
   uart_puts("  state=");   uart_put_u32((uint32_t)hsd1.State);

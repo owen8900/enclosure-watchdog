@@ -673,7 +673,7 @@
                             
               <Undefine />
                             
-              <IncludePath>../Core/Inc;   ../Drivers/STM32H7xx_HAL_Driver/Inc;   ../Drivers/STM32H7xx_HAL_Driver/Inc/Legacy;   ../Drivers/CMSIS/Device/ST/STM32H7xx/Include;   ../Drivers/CMSIS/Include; ../FATFS/Target; ../FATFS/App; ../Middlewares/Third_Party/FatFs/src</IncludePath>
+              <IncludePath>../Core/Inc;   ../Drivers/STM32H7xx_HAL_Driver/Inc;   ../Drivers/STM32H7xx_HAL_Driver/Inc/Legacy;   ../Drivers/CMSIS/Device/ST/STM32H7xx/Include;   ../Drivers/CMSIS/Include; ../FATFS/Target; ../FATFS/App; ../Middlewares/Third_Party/FatFs/src;../Drivers/BSP/ili9341</IncludePath>
                           
             </VariousControls>
                       
@@ -1843,6 +1843,22 @@
         </Group>
                 
         
+        <Group>
+          <GroupName>BSP/ili9341</GroupName>
+          <Files>
+            <File>
+              <FileName>ili9341.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Drivers\BSP\ili9341\ili9341.c</FilePath>
+            </File>
+            <File>
+              <FileName>ili9341.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Drivers\BSP\ili9341\ili9341.h</FilePath>
+            </File>
+          </Files>
+        </Group>
+
         <Group>
           <GroupName>Startup</GroupName>
           <Files>
