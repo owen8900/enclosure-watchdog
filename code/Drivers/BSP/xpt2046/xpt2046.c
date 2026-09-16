@@ -440,7 +440,56 @@ static void xpt_calib_summary(const uint16_t cap[4][2], uint8_t round,
         xpt_log("..");
         xpt_log_u32(ymax);
         xpt_log("\r\n");
-        xpt_log("  keep XPT2046_VALID_MIN/MAX outside this range\r\n");
+    }
+
+    /* 四点自身的范围 = 「按下时」的真实范围，拿它定窗口。
+     * 空闲时的 X 是乱跳的（面板没电流），既不能用来判按下、也不能拿来卡窗口，
+     * 所以这里分开报，别混。 */
+    {
+        uint16_t xlo = cap[0][0], xhi = cap[0][0];
+        uint16_t ylo = cap[0][1], yhi = cap[0][1];
+        uint8_t  k;
+
+        for (k = 1u; k < 4u; k++)
+        {
+            if (cap[k][0] < xlo) { xlo = cap[k][0]; }
+            if (cap[k][0] > xhi) { xhi = cap[k][0]; }
+            if (cap[k][1] < ylo) { ylo = cap[k][1]; }
+            if (cap[k][1] > yhi) { yhi = cap[k][1]; }
+        }
+
+        xpt_log("pressed range (4 points): X ");
+        xpt_log_u32(xlo);
+        xpt_log("..");
+        xpt_log_u32(xhi);
+        xpt_log("  Y ");
+        xpt_log_u32(ylo);
+        xpt_log("..");
+        xpt_log_u32(yhi);
+        xpt_log("\r\n");
+
+        if (have_idle != 0u)
+        {
+            xpt_log("idle Y rail = ");
+            xpt_log_u32(ymin);
+            xpt_log("   (idle X is meaningless: it wanders while X can overlap\r\n");
+            xpt_log("  the left-edge pressed value, so never use X to gate the window)\r\n");
+
+            if (ymin > XPT2046_VALID_MAX && yhi < XPT2046_VALID_MAX)
+            {
+                xpt_log("  -> current window (");
+                xpt_log_u32(XPT2046_VALID_MIN);
+                xpt_log("..");
+                xpt_log_u32(XPT2046_VALID_MAX);
+                xpt_log(") separates them: OK\r\n");
+            }
+            else
+            {
+                xpt_log("  -> window too tight: pressed Y or idle rail crosses ");
+                xpt_log_u32(XPT2046_VALID_MAX);
+                xpt_log("\r\n");
+            }
+        }
     }
 
     xpt_log("worst spread this round = ");
