@@ -67,7 +67,7 @@ static void ui_row(uint16_t y, const char *val, uint8_t lvl)
     ili9341_fill_rect(UI_BADGE_X, (uint16_t)(y + 4), UI_BADGE_W, UI_BADGE_H, ui_lvl_color(lvl));
 }
 
-/* 中间那条总告警：整条上色 + 居中文字 */
+/* 总告警条：整条上色 + 居中文字 */
 static void ui_alarm_bar(uint8_t lvl)
 {
     const char *t = "NORMAL";

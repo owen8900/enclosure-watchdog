@@ -16,19 +16,14 @@
 /* 滤波：读 5 次，排序后丢掉最大最小各 1 个，中间 3 个取平均（照厂商 TP_Read_XOY） */
 #define XPT_READ_TIMES   5
 #define XPT_LOST_VAL     1
-/* 前后两次采样的最大偏差（照厂商 TP_Read_XY2 的 ERR_RANGE = 50）：
- * 超过就认为抖了或没按稳，这一轮读数作废 */
+/* 前后两次采样的最大偏差（厂商 ERR_RANGE），超过即判抖动作废 */
 #define XPT_ERR_RANGE    50
 
-/* 位翻转的半周期延时。XPT2046 的 SCLK 上限约 2MHz（厂商例程也是 1us 一级地给），
- * 而 480MHz 内核一次 GPIO 翻转只要十几纳秒，必须自己拖慢。
- * 循环次数是估的、没上板量过：一次 volatile 空循环按 6~8 个周期算，40 次约 0.5us，
- * 半周期 0.5us -> SCLK 约 1MHz，离上限留一倍余量。触摸读数不是性能路径，慢点更稳。 */
+/* 位翻转半周期延时：40 次空循环约 0.5us，SCLK 约 1MHz（上限 2MHz 的一半） */
 #define XPT_HALF_CLK     40
 /* 发完命令字等转换完成（厂商 delay_us(6)，手册 tCONV 上限 6us） */
 #define XPT_CONV_LOOPS   240
 
-/* ---- 四根线的电平操作 ---- */
 #define TOUCH_CS_H    HAL_GPIO_WritePin(TOUCH_CS_GPIO_Port,  TOUCH_CS_Pin,  GPIO_PIN_SET)
 #define TOUCH_CS_L    HAL_GPIO_WritePin(TOUCH_CS_GPIO_Port,  TOUCH_CS_Pin,  GPIO_PIN_RESET)
 #define TOUCH_CLK_H   HAL_GPIO_WritePin(TOUCH_CLK_GPIO_Port, TOUCH_CLK_Pin, GPIO_PIN_SET)
@@ -37,9 +32,7 @@
 #define TOUCH_DIN_L   HAL_GPIO_WritePin(TOUCH_DIN_GPIO_Port, TOUCH_DIN_Pin, GPIO_PIN_RESET)
 #define TOUCH_DO_IN   (HAL_GPIO_ReadPin(TOUCH_DO_GPIO_Port, TOUCH_DO_Pin) == GPIO_PIN_SET)
 
-/* ---- 位翻转层 ---- */
-
-/* 空转 loops 次。volatile 不能省，否则 -O3 会把这个空循环整个删掉。 */
+/* 空转 loops 次（volatile 不能省，否则会被优化掉） */
 static void xpt_wait(uint32_t loops)
 {
     volatile uint32_t i;
@@ -86,16 +79,14 @@ static uint16_t xpt_read_ad(uint8_t cmd)
     xpt_write_byte(cmd);
     xpt_wait(XPT_CONV_LOOPS);           /* 等这次转换出结果 */
 
-    /* 补一个时钟把 BUSY 位推走。不补的话读回来的是 BUSY 打头的错位数据，
-     * 表现是坐标整体偏小、还随按压力度乱跳。 */
+    /* 补一个时钟把 BUSY 位推走，否则读回的是错位数据，坐标偏小且乱跳 */
     TOUCH_CLK_L;
     xpt_wait(XPT_HALF_CLK);
     TOUCH_CLK_H;
     xpt_wait(XPT_HALF_CLK);
     TOUCH_CLK_L;
 
-    /* 读 16 位再右移 4 位得 12 位结果 —— 与厂商例程逐位一致。
-     * 改成只读 12 位更漂亮，但那是自己引入的一层不确定性，不划算。 */
+    /* 读 16 位后右移 4 位得 12 位结果，与厂商例程一致 */
     for (i = 0; i < 16u; i++)
     {
         v = (uint16_t)(v << 1);
@@ -150,13 +141,13 @@ static uint16_t xpt_read_filtered(uint8_t cmd)
     return (uint16_t)(sum / (XPT_READ_TIMES - 2u * XPT_LOST_VAL));
 }
 
-/* 两个数的差值（保证非负） */
+/* 两数之差的绝对值 */
 static uint16_t xpt_diff(uint16_t a, uint16_t b)
 {
     return (a > b) ? (uint16_t)(a - b) : (uint16_t)(b - a);
 }
 
-/* 值落在「按下」窗口里？没接 T_IRQ，这就是判断有没有按下的全部依据 */
+/* 值是否落在「按下」窗口内（没接 T_IRQ，只能靠值判断） */
 static uint8_t xpt_in_window(uint16_t x, uint16_t y)
 {
     if (x < XPT2046_VALID_MIN || x > XPT2046_VALID_MAX)
@@ -170,34 +161,19 @@ static uint8_t xpt_in_window(uint16_t x, uint16_t y)
     return 1;
 }
 
-/* ---- 标定与映射 ---- */
-
-/* 标定值：2026-09-16 在欧文板子上量的（标定向导取数 + 五点验收校方向）。
- *
- * 关键一条：**这块面板的 raw Y 与屏幕 Y 是反的** —— raw Y 大对应屏幕上方。
- * 方向不能靠「谁先点的」去推（第一轮我就是这么推错的），要靠验收向导：
- * 它按提示位置逐个比对，四个角一 FAIL 就能看出整体翻转。
- *
- * 取值（每边两个角样本取平均，他的按压精度约 ±6 像素）：
- *   屏幕左 (196,205)   -> x_raw_at_0   = 241
- *   屏幕右 (3818,3837) -> x_raw_at_max = 3805
- *   屏幕上 (3886,3864) -> y_raw_at_0   = 3875
- *   屏幕下 (255,257)   -> y_raw_at_max = 256
- * 面板有效区约 3564 x 3619 个数，接近正方形（这类 2.8 寸屏就是这样）。
- *
- * ⚠️ 这几个数只对这块屏有效（电阻屏离散性很大），换屏必须重量重校。 */
+/* 标定值：2026-09-16 在这块屏上实测（标定向导取数 + 五点验收校方向）。
+ * 这块面板的 raw Y 与屏幕 Y 相反 —— raw Y 大对应屏幕上方。
+ * 数只对这块屏有效，换屏必须重量重校。 */
 static xpt2046_cal_t s_cal =
 {
-    241,    /* x_raw_at_0   —— 屏幕左（X=0）处的原始 X */
-    3805,   /* x_raw_at_max —— 屏幕右（X=239）处的原始 X */
-    3875,   /* y_raw_at_0   —— 屏幕上（Y=0）处的原始 Y：注意 raw 大 = 屏幕上方 */
-    256,    /* y_raw_at_max —— 屏幕下（Y=319）处的原始 Y */
-    0       /* swap_xy      —— 实测 X/Y 没反（横拖时 X 变 Y 稳），保持 0 */
+    241,    /* x_raw_at_0   屏幕左 */
+    3805,   /* x_raw_at_max 屏幕右 */
+    3875,   /* y_raw_at_0   屏幕上（raw 大 = 上方） */
+    256,    /* y_raw_at_max 屏幕下 */
+    0       /* swap_xy      X/Y 未交换 */
 };
 
-/* 线性映射：raw_at_0 映射到 0 像素，raw_at_max 映射到 span-1 像素。
- * 两端填反了也能用（分子分母同时变号，结果仍是正确的反向映射），
- * 所以不需要单独的 invert 标志。越界一律钳到边界，不让 UI 拿到野坐标。 */
+/* 线性映射：raw_at_0 -> 0 像素，raw_at_max -> span-1 像素，越界钳到边界 */
 static uint16_t xpt_map(uint16_t raw, uint16_t raw_at_0, uint16_t raw_at_max, uint16_t span)
 {
     int32_t den = (int32_t)raw_at_max - (int32_t)raw_at_0;
@@ -236,19 +212,15 @@ const xpt2046_cal_t *xpt2046_get_cal(void)
     return &s_cal;
 }
 
-/* ---- 对外接口 ---- */
-
 void xpt2046_init(void)
 {
-    /* 4 个脚的模式由 CubeMX 生成的 MX_GPIO_Init() 配好，这里只把空闲电平摆正：
-     * 片选高（不选中）、时钟低、数据线低。 */
+    /* 引脚模式由 CubeMX 配好，这里只把空闲电平摆正 */
     TOUCH_CS_H;
     TOUCH_CLK_L;
     TOUCH_DIN_L;
 }
 
-/* 读一次物理坐标（两个轴各一次带滤波读数，约 0.3ms）。
- * 不做有效性判断 —— 松开触笔时给出的也是真实读数（通常跑到窗口外）。 */
+/* 读一次物理坐标（约 0.3ms），不做有效性判断 */
 void xpt2046_scan(uint16_t *x, uint16_t *y)
 {
     if (x != 0)
@@ -261,9 +233,7 @@ void xpt2046_scan(uint16_t *x, uint16_t *y)
     }
 }
 
-/* 读一次并判断「算不算按下」：1 = 有效，0 = 没按下或读数抖了。
- * 判据两条（第二条照厂商 TP_Read_XY2）：X/Y 都落在有效窗口内，
- * 且连读两次的偏差都不超过 XPT_ERR_RANGE。一次调用约 0.6ms。 */
+/* 读一次并判断是否按下：1 = 有效。X/Y 都在窗口内且两次读数偏差不超 ERR_RANGE */
 uint8_t xpt2046_read_raw(uint16_t *x, uint16_t *y)
 {
     uint16_t x1, y1, x2, y2;
@@ -299,8 +269,7 @@ uint8_t xpt2046_read_raw(uint16_t *x, uint16_t *y)
     return 1;
 }
 
-/* 读一次屏幕像素坐标：1 = 有效。标定参数不对时给出的坐标就是错的，
- * 所以第一次上板必须先用 xpt2046_selftest() 把 s_cal 量准。 */
+/* 读一次屏幕像素坐标：1 = 有效。标定不准时坐标就是错的 */
 uint8_t xpt2046_read_screen(uint16_t *px, uint16_t *py)
 {
     uint16_t rx, ry;
@@ -328,15 +297,12 @@ uint8_t xpt2046_read_screen(uint16_t *px, uint16_t *py)
     return 1;
 }
 
-/* 原始值 -> 像素。定义在下面的验收段里，这里先声明（对外接口要用）。 */
+/* 定义在下面的验收段里 */
 static void xpt_raw_to_px(uint16_t rx, uint16_t ry, uint16_t *px, uint16_t *py);
 
-/* 单次读并映射成像素坐标：1 = 有效（原始值落在窗口内）。
- * 跟 xpt2046_read_screen() 的区别是**不做两次一致校验** —— 拖动画线时两次读数
- * 必然不一致（手指在动），用那个接口会一路丢点，线画不出来。代价是噪声点不滤。
- * 用法分清楚：点按/要稳（判定"按下了"）用 xpt2046_read_screen()，
- * 跟手/要连续（画线、拖动滑块）用这个。
- * rx / ry 非空时顺便把原始值带出去（显示与排查用）。 */
+/* 单次读并映射成像素坐标：1 = 有效。不做两次一致校验（拖动时必然不一致），
+ * 用于画线 / 跟手；要稳的点按判断用 xpt2046_read_screen()。
+ * rx / ry 非空时把原始值带出去。 */
 uint8_t xpt2046_read_screen_fast(uint16_t *px, uint16_t *py, uint16_t *rx, uint16_t *ry)
 {
     uint16_t x, y;
@@ -354,7 +320,7 @@ uint8_t xpt2046_read_screen_fast(uint16_t *px, uint16_t *py, uint16_t *rx, uint1
     return 1;
 }
 
-/* ---- 日志（本工程不用 printf，省 Flash） ---- */
+/* 日志：本工程不用 printf，省 Flash */
 
 static void (*s_log)(const char *msg) = 0;
 
@@ -401,20 +367,10 @@ static void xpt_log_u32(uint32_t v)
     xpt_log(buf);
 }
 
-/* ---- 上板自检与标定 ---- */
-
-/* 标定向导：让固件在读数稳住的时候自己把平均值锁下来打一行，
- * 省得人眼盯着跳数抄 —— 手指本来就在动，单次采样也有噪声，看跳数取不准。
- *
- * 每次按下累计平均值和极值，满足下面任一条就捕获：
- *   (a) 采样 >= XPT_PRESS_MIN 且 X/Y 的极差都 <= XPT_STABLE_TOL（干净，早捕获）
- *   (b) 采样 >= XPT_PRESS_MAX（约 800ms，无论多吵都捕获，不会卡住人）
- * 捕获后一直沉默到松手，所以串口不刷屏：一次按下对应一行。
- * 打出来的 X/Y 极差就是这一次的质量指标，小才可信。
- *
- * 一轮四个点：LEFT / RIGHT / TOP / BOTTOM，各点住不放一下。
- * 四点齐了打出可以直接抄进 s_cal 的块，然后重开一轮（抄错了可以重来）。
- * 整个过程受 seconds 秒上限约束，到点自己结束，不会卡住主流程。 */
+/* 标定向导：点住一条边不动，固件在读数稳住时（采样数够且极差 <= XPT_STABLE_TOL，
+ * 或撑到 XPT_PRESS_MAX 必捕获）自己锁平均值打一行 [CAPTURE]，一次按下对应一行。
+ * 一轮四个点：LEFT / RIGHT / TOP / BOTTOM，四点齐了给出可抄进 s_cal 的块。
+ * 受 seconds 秒上限约束。 */
 
 #define XPT_STABLE_TOL    48u       /* 极差在这以内算读得干净（约 3 像素） */
 #define XPT_PRESS_MIN     6u        /* 至少累计这么多次采样才允许早捕获 */
@@ -431,9 +387,7 @@ static const char *xpt_edge_name(uint8_t i)
     return "BOTTOM";
 }
 
-/* 四点结果汇总。除了四个标定值，还打两个交叉项：
- * 左右两点的 Y 应该几乎一样、上下两点的 X 应该几乎一样，
- * 差得多就说明 X/Y 读错位了（要开 swap_xy）。 */
+/* 汇总四点：四个标定值 + 交叉项（左右两点的 Y、上下两点的 X 应各自接近） */
 static void xpt_calib_summary(const uint16_t cap[4][2], uint8_t round,
                               uint8_t have_idle, uint16_t xmin, uint16_t xmax,
                               uint16_t ymin, uint16_t ymax, uint16_t worst_spread)
@@ -480,9 +434,7 @@ static void xpt_calib_summary(const uint16_t cap[4][2], uint8_t round,
         xpt_log("\r\n");
     }
 
-    /* 四点自身的范围 = 「按下时」的真实范围，拿它定窗口。
-     * 空闲时的 X 是乱跳的（面板没电流），既不能用来判按下、也不能拿来卡窗口，
-     * 所以这里分开报，别混。 */
+    /* 四点范围即「按下时」的真实范围，用来定窗口；空闲范围单独报 */
     {
         uint16_t xlo = cap[0][0], xhi = cap[0][0];
         uint16_t ylo = cap[0][1], yhi = cap[0][1];
@@ -580,7 +532,7 @@ void xpt2046_selftest(uint16_t seconds)
 
         if (xpt_in_window(rx, ry) == 0)
         {
-            /* 跑出窗口 = 没按下。顺手统计空闲范围，标定完要拿它定有效窗口。 */
+            /* 跑出窗口 = 没按下，顺手统计空闲范围 */
             if (rx < idle_xmin) { idle_xmin = rx; }
             if (rx > idle_xmax) { idle_xmax = rx; }
             if (ry < idle_ymin) { idle_ymin = ry; }
@@ -701,18 +653,12 @@ void xpt2046_selftest(uint16_t seconds)
     xpt_log("--- XPT2046 calibration done ---\r\n");
 }
 
-/* ---- 五点验收 ---- */
-
-/* 标定准不准不该靠眼睛估。点住提示的位置，固件把它映射成像素坐标，
- * 跟期望值比对，直接给 PASS/FAIL。
- * 五个点覆盖左上、右上、左下、右下、正中 —— 方向反了、轴换错了、
- * 量程不准，都会在这五个点上暴露出来。
- * 捕获判据跟标定向导一样（稳住就早捕获，撑到 800ms 必捕获），
- * 所以不用眼睛看跳数。 */
+/* 五点验收：点住四个角加正中，固件把读数映射成像素后跟期望值比，直接给 PASS/FAIL。
+ * 捕获判据与标定向导一致。 */
 
 #define XPT_VERIFY_TOL   12u        /* 判定容差（像素），约 3 毫米 */
 
-/* 原始值 -> 像素。swap_xy 的处理跟 xpt2046_read_screen() 保持一致。 */
+/* 原始值 -> 像素，swap_xy 处理同 xpt2046_read_screen() */
 static void xpt_raw_to_px(uint16_t rx, uint16_t ry, uint16_t *px, uint16_t *py)
 {
     uint16_t t;
@@ -927,10 +873,8 @@ void xpt2046_verify(uint16_t seconds)
     xpt_log("--- XPT2046 verify done ---\r\n");
 }
 
-/* 接线核对：依次把 T_CS / T_CLK / T_DIN 以 1Hz 翻转 8 秒。
- * 万用表打到直流 20V 档，黑笔抵板子 GND，红笔点线头，应看到 0V <-> 3.3V 摆动。
- * 串口提示哪一根就是哪一根，一次只动一根。
- * T_DO 是输入脚，翻转不了 —— 那一根只能用蜂鸣档量通断。 */
+/* 接线核对：T_CS / T_CLK / T_DIN 逐根以 1Hz 翻转 8 秒，万用表直流档核对。
+ * T_DO 是输入脚，只能用蜂鸣档量通断。 */
 static void xpt_toggle(GPIO_TypeDef *port, uint16_t pin, uint8_t cycles, GPIO_PinState idle)
 {
     uint8_t i;

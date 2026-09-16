@@ -1,4 +1,4 @@
-/* USER CODE BEGIN Header */
+﻿/* USER CODE BEGIN Header */
 /**
   ******************************************************************************
   * @file           : main.c
@@ -41,15 +41,13 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-/* 接线核对模式：1 = 上电先跑「逐根线慢速翻转」，配合万用表沿线路核对；平时保持 0。
- * 2026-09-16：屏不亮就是靠它定位到一根线松动，核对完已改回 0。 */
+/* 接线核对模式：1 = 上电先逐根线慢翻转，配合万用表核对；平时保持 0 */
 #define LCD_WIRING_TEST 0
 
-/* 触摸（XPT2046）三个开关：
- * XPT_WIRING_TEST    1 = 上电先把 T_CS/T_CLK/T_DIN 逐根慢翻转，配合万用表核对接线；平时 0
- * XPT_SELFTEST_MODE  1 = 标定向导（取 s_cal 用）  2 = 五点验收（验证 s_cal 准不准）
- * XPT_SELFTEST_SECONDS  > 0 = 上电跑 N 秒向导；正式固件里改回 0 —— 它是阻塞的。
- * 2026-09-16：量标定值时用 1 跑了一轮；现在填完 s_cal，改用 2 验收。 */
+/* 触摸自检开关：
+ * XPT_WIRING_TEST      1 = 触摸四线逐根慢翻转核对；平时 0
+ * XPT_SELFTEST_MODE    1 = 标定向导  2 = 五点验收
+ * XPT_SELFTEST_SECONDS > 0 = 上电跑 N 秒（阻塞），正式固件改回 0 */
 #define XPT_WIRING_TEST        0
 #define XPT_SELFTEST_MODE      2
 #define XPT_SELFTEST_SECONDS   0
@@ -63,12 +61,11 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-/* FatFs 对象约 1.1KB，而 main() 的栈只有 1KB（Stack_Size = 0x400），
- * 放栈上会溢出，所以放文件级静态。 */
+/* FATFS/DIR/FIL 共约 1.2KB，main 的栈只有 1KB，必须放文件级静态 */
 static FATFS s_fs;
 static DIR   s_dir;
 static FIL   s_fil;
-/* 调试用文件对象（dump / 取大小）。FIL 有 560 字节，必须静态，不能上栈。 */
+/* dump / 取大小用的文件对象 */
 static FIL   s_dbg;
 
 static uint32_t g_cycle = 0;
@@ -83,7 +80,7 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-/* 极简串口输出：不用 printf()，省下标准库格式化代码的几 KB Flash。 */
+/* 极简串口输出，不用 printf，省几 KB Flash */
 static void uart_puts(const char *s)
 {
     HAL_UART_Transmit(&huart1, (uint8_t *)s, (uint16_t)strlen(s), 1000);
@@ -131,8 +128,7 @@ static void uart_put_hex32(uint32_t v)
     uart_puts(buf);
 }
 
-/* uint32 -> 十进制 ASCII，写进 out[]，返回字节数（不写结尾 '\0'）。
- * uint32 十进制最多 10 位（4294967295），tmp 只做倒序暂存。 */
+/* uint32 -> 十进制 ASCII，写进 out[]，返回字节数（不写结尾 '\0'） */
 static int u32_to_str(uint32_t v, char *out)
 {
     char tmp[10];
@@ -196,8 +192,7 @@ static uint32_t file_size_of(const char *path)
     return sz;
 }
 
-/* 把文件开头 max 字节从串口 dump 出来 —— 手边没读卡器时的替代验证手段。
- * 用 HAL_UART_Transmit 定长发，不走 uart_puts：读回来的数据没有结尾 '\0'。 */
+/* 把文件开头 max 字节 dump 到串口（没读卡器时的验证手段），定长发 */
 static void file_dump_head(const char *path, uint32_t max)
 {
     FRESULT  fr;
@@ -277,9 +272,9 @@ static void ui_refresh(uint32_t cycle, uint32_t spi_err, uint8_t sd_ok)
   * @brief  The application entry point.
   * @retval int
   */
-/* ---- M7 触摸演示（① 画点） ---- */
+/* M7：触摸轮询与画点 */
 
-/* 各动作的周期：谁都不阻塞谁（见主循环里的时间片调度） */
+/* 各动作周期，时间片调度互不阻塞 */
 #define TICK_LED_MS       300u      /* RGB 每色亮多久 */
 #define TICK_TOUCH_MS      20u      /* 触摸扫描周期：50Hz 手感够，也不占 CPU */
 #define TICK_HB_MS       1000u      /* 心跳：串口一行 + 追加进 SD 日志 */
@@ -288,7 +283,7 @@ static void ui_refresh(uint32_t cycle, uint32_t spi_err, uint8_t sd_ok)
 #define TOUCH_STATUS_Y    304u      /* 触摸状态行占用屏幕最底下 16 像素 */
 #define TOUCH_MARK_COLOR  ILI9341_RED
 
-/* 累计触摸次数（点标题栏清屏时归零） */
+/* 累计触摸次数 */
 static uint32_t g_touch_n = 0u;
 
 /* 往 dst 尾部追加 src，返回追加的字节数 */
@@ -304,8 +299,7 @@ static int append_str(char *dst, const char *src)
     return n;
 }
 
-/* 在 (px,py) 画一个 9x9 的十字。坐标先夹进屏幕：
- * 十字向四周各伸 4 像素，不夹的话窗口会写到屏幕外去。 */
+/* 在 (px,py) 画 9x9 十字，坐标先夹进屏幕（四周各伸 4 像素） */
 static void touch_marker(uint16_t px, uint16_t py)
 {
     uint16_t x = px;
@@ -338,9 +332,7 @@ static void touch_status(uint16_t px, uint16_t py)
     ili9341_draw_string(4u, TOUCH_STATUS_Y, buf, ILI9341_WHITE, ILI9341_BLACK, 1u);
 }
 
-/* 松手时往串口打一行：屏幕上的坐标 + 对应原始值 + 累计次数。
- * 有了它，排查"显示跟手指不一致"时不用拍照 —— 直接发日志文件即可，
- * 从 raw 和 px 的对应关系就能判断是读数反了还是画的位置不对。 */
+/* 松手时串口打一行：像素坐标 + 对应原始值 + 累计次数 */
 static void touch_log_line(uint16_t px, uint16_t py, uint16_t rx, uint16_t ry)
 {
     uart_puts("TOUCH px=");
@@ -356,12 +348,8 @@ static void touch_log_line(uint16_t px, uint16_t py, uint16_t rx, uint16_t ry)
     uart_puts("\r\n");
 }
 
-/* 触摸轮询（每 TICK_TOUCH_MS 调一次）。
- * 按下就画十字、跟着手指走；松手把最终坐标记到状态行；
- * 点标题栏那一条（y < 32）＝ 换一种显示方向并重画（调试用：四种方向循环，
- * 挑出读字正的那个，再把 ili9341.c 的 s_orient_idx 开机值定死）。
- * 用途有两个：一是演示，二是**验收时间片改造** —— 十字跟手就说明触摸扫描
- * 没被 LED/写卡/刷屏那些动作的延时卡住。 */
+/* 触摸轮询（每 TICK_TOUCH_MS 调一次）：按下画十字并跟手，松手把最终坐标记到状态行。
+ * 十字跟手就说明触摸扫描没被 LED / 写卡 / 刷屏的延时卡住。 */
 static void touch_poll(void)
 {
     static uint8_t  down_before = 0u;
@@ -391,21 +379,6 @@ static void touch_poll(void)
     {
         down_before = 1u;
         g_touch_n++;
-        if (py < 32u)                           /* 标题栏：换一种显示方向并重画 */
-        {
-            uint8_t idx = ili9341_orient_next();
-
-            uart_puts("LCD orient : idx=");
-            uart_put_u32((uint32_t)idx);
-            uart_puts("  madctl=0x");
-            uart_put_hex32((uint32_t)ili9341_orient_madctl());
-            uart_puts("   (0=0x08 1=0x48 2=0xC8 3=0x88)\r\n");
-
-            lcd_ui_draw_static();
-            ui_refresh(g_cycle, ili9341_error_count(), 1u);
-            g_touch_n = 0u;
-            return;
-        }
     }
     else
     {
@@ -468,8 +441,7 @@ int main(void)
     uart_puts("----------------------------------------\r\n");
     uart_puts("RGB LED    : cycling RED -> GREEN -> BLUE\r\n\r\n");
 
-    /* M4：TFT 屏自检（红 -> 绿 -> 蓝 各 0.4 秒，最后清黑）
-     * 串口打印字符串保持 ASCII，避免不同终端乱码。 */
+    /* M4：TFT 屏自检（红 -> 绿 -> 蓝 各 0.4 秒）。串口字符串保持 ASCII */
     {
         uint8_t lcd_err;
 
@@ -508,17 +480,14 @@ int main(void)
         uart_puts("TFT UI     : panel drawn\r\n");
     }
 
-    /* M6：触摸（XPT2046）自检。XPT_SELFTEST_MODE 决定跑哪个向导，
-     * 两个都受 XPT_SELFTEST_SECONDS 秒上限约束、都是阻塞的，正式固件里把秒数改回 0：
-     *   1 = 标定向导：点住四条边，读数稳住时固件自己锁值打 [CAPTURE]，
-     *       四点齐了给出可直接抄进 s_cal 的块（含空闲范围和交叉校验）；
-     *   2 = 五点验收：点住四个角加正中，固件映射成像素后跟期望值比，直接 PASS/FAIL。 */
+    /* M6：触摸（XPT2046）自检。XPT_SELFTEST_MODE 选向导，受 XPT_SELFTEST_SECONDS
+     * 秒上限约束，都是阻塞的，正式固件里秒数改回 0：
+     *   1 = 标定向导（点四条边取标定值）  2 = 五点验收（四角加正中，PASS/FAIL） */
     {
         xpt2046_set_log(uart_puts);
         xpt2046_init();
 
-        /* 开机把实际生效的标定值打出来：万一烧的是旧固件、或者标定没生效，
-         * 看这一行立刻就知道了（曾经在这类事上浪费过时间）。 */
+        /* 开机打印实际生效的标定值，确认烧进去的是新固件 */
         {
             const xpt2046_cal_t *c = xpt2046_get_cal();
 
@@ -534,13 +503,6 @@ int main(void)
             uart_put_u32(c->swap_xy);
             uart_puts("\r\n");
         }
-
-        /* 当前显示方向（点标题栏可以循环切换，见 touch_poll） */
-        uart_puts("LCD orient : idx=");
-        uart_put_u32((uint32_t)ili9341_orient_get());
-        uart_puts("  madctl=0x");
-        uart_put_hex32((uint32_t)ili9341_orient_madctl());
-        uart_puts("   (0=0x08 1=0x48 2=0xC8 3=0x88)\r\n");
 
 #if XPT_WIRING_TEST
         uart_puts("TOUCH XPT  : wiring check\r\n");
@@ -604,8 +566,7 @@ int main(void)
                 uart_put_u32(ci.CardType);    uart_puts("\r\n");
                 uart_puts("SD version : ");
                 uart_put_u32(ci.CardVersion); uart_puts("\r\n");
-                /* Class 是 CSD 的 CCC 命令类位图（HAL 取 RESP2>>20），不是速度等级。
-                 * 0x5B5 = 支持命令类 0/2/4/5/7/8/10。 */
+                /* Class 是 CSD 的 CCC 命令类位图，不是速度等级 */
                 uart_puts("SD class   : ");
                 uart_put_u32(ci.Class);       uart_puts("\r\n");
                 uart_puts("SD blockNbr: ");
@@ -670,8 +631,7 @@ int main(void)
                 }
             }
 
-            /* 5. 写文件再读回来逐字节比对 —— 固件自己验证自己的写入，
-             * 不需要读卡器。 */
+            /* 5. 写文件再读回来比对，固件自己验证写入 */
             {
                 UINT bw = 0, br = 0;
                 static const char LINE[] = "Cabinet Guardian FATFS self test\r\n";
@@ -724,8 +684,7 @@ int main(void)
                 }
             }
 
-            /* 6. 日志文件开头 dump 一次：验证「上一轮跑完，卡里到底存了什么」。
-             * 没读卡器时就看这里。 */
+            /* 6. 日志文件开头 dump 一次，看上一轮存了什么 */
             file_dump_head("0:/LOG.TXT", 200);
         }
     }
@@ -734,7 +693,7 @@ int main(void)
   /* USER CODE END 2 */
 
   /* M2/M7 时间片主循环的节拍。原来整轮用 HAL_Delay 串起来（光 RGB 三色就 0.9 秒），
-     触摸扫描夹在里面会漏按 —— 人点一下几十毫秒，程序正卡在延时里就丢了。 */
+     触摸扫描夹在里面会漏按。 */
   uint32_t t_led    = HAL_GetTick();
   uint32_t t_touch  = HAL_GetTick();
   uint32_t t_hb     = HAL_GetTick();
@@ -770,7 +729,7 @@ int main(void)
         touch_poll();
     }
 
-    /* 心跳：串口一行 + 追加进 SD 日志（跟改前逐字节相同） */
+    /* 心跳：串口一行 + 追加进 SD 日志 */
     if ((now - t_hb) >= TICK_HB_MS)
     {
         char line[20];
@@ -812,7 +771,7 @@ int main(void)
         uart_puts(" B\r\n");
     }
 
-    /* 面板刷新：周期最长，一次几十毫秒，别做太勤 */
+    /* 面板刷新：一次几十毫秒，周期放长 */
     if ((now - t_ui) >= TICK_UI_MS)
     {
         t_ui = now;
@@ -889,7 +848,7 @@ void SystemClock_Config(void)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-  /* 死之前先打印原因：静默死等会让人误判成板子坏了或固件没烧进去。 */
+  /* 先打印出错原因再停住 */
   uart_puts("\r\n*** FATAL: Error_Handler() ***\r\n");
   uart_puts("SD  err=0x"); uart_put_hex32(hsd1.ErrorCode);
   uart_puts("  state=");   uart_put_u32((uint32_t)hsd1.State);

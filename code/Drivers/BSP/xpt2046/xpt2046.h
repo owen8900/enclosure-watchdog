@@ -4,16 +4,9 @@
   * 功能    : 2.8 寸 ILI9341 SPI 模块上的电阻触摸（XPT2046）驱动接口
   * 硬件    : MiniPro STM32H750 V1.5，4 条独立 GPIO 位翻转，不占硬件 SPI
   *            T_CS=PC3  T_CLK=PB14  T_DIN=PA3  T_DO=PC0
-  * 说明    : 时序、命令字、滤波参数都取自厂商软件 SPI 例程：
-  *            ref-vendor/MSP2807/extracted/1-Demo/Demo_STM32/
+  * 说明    : 时序、命令字取自厂商软件 SPI 例程
   *            Demo_STM32F103RCT6_Software_SPI/HARDWARE/TOUCH/touch.c
-  *
-  *            用位翻转而不是共用 SPI2 的原因：XPT2046 的 SCLK 上限约 2MHz，
-  *            而 ILI9341 跑在 6MHz。合成一条总线的话，每读一次触摸都要先改
-  *            SPI2 分频、读完再改回来；状态一多，等上 FreeRTOS 加互斥量时
-  *            就是 bug 温床。模块上 LCD 和触摸本来就是两条独立的 SPI
-  *            （T_CLK/T_DIN/T_DO 与 SCK/SDI/SDO 分开引出），分开接只多占
-  *            3 个脚，互不干扰。
+  *            SCLK 上限约 2MHz，与 ILI9341 的 6MHz 不同，所以不共用 SPI2
   ******************************************************************************
   */
 
@@ -26,21 +19,17 @@
 /* 12 位 AD 的满量程 */
 #define XPT2046_RAW_MAX     4095
 
-/* 屏幕分辨率。必须和 ili9341.h 的 ILI9341_WIDTH / ILI9341_HEIGHT 一致。
- * 这里不 include ili9341.h，是为了让触摸驱动不依赖显示驱动。 */
+/* 屏幕分辨率，必须与 ili9341.h 一致（不 include 是为了不依赖显示驱动） */
 #define XPT2046_SCREEN_W    240
 #define XPT2046_SCREEN_H    320
 
-/* 「算不算按下了」的原始值窗口。没接 T_IRQ 线，只能靠值判断：
- * 触笔没落下时 X/Y 会跑出这个窗口。
- * 这两个数是估的，不是量出来的 —— 先跑 xpt2046_selftest()，把松开手和按住时
- * 各自的实测值记下来，再回来定这两个数。 */
+/* 「按下」判定的原始值窗口（没接 T_IRQ，只能靠值判断）：
+ * 空闲时 Y 顶在 4095，按下时 Y 最大约 3820，100/4000 正好把两者分开。 */
 #define XPT2046_VALID_MIN   100
 #define XPT2046_VALID_MAX   4000
 
-/* 标定参数：把原始 AD 值线性映射成屏幕像素。
- * raw_at_0 = 触笔点在第 0 像素那一端的原始值，raw_at_max = 另一端。
- * 两端填反了也能用（自动得到反向映射），不需要额外的 invert 标志。 */
+/* 标定参数：把原始 AD 值线性映射成像素。
+ * raw_at_0 / raw_at_max = 第 0 像素和另一端处的原始值，两端填反了也能用。 */
 typedef struct
 {
     uint16_t x_raw_at_0;        /* 屏幕 X=0 处的原始值 */

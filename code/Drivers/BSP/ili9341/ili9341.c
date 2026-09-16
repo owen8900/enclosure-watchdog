@@ -3,9 +3,7 @@
   * 文件    : ili9341.c
   * 功能    : LCDWiki 2.8 寸 SPI 模块（ILI9341，240x320）驱动实现
   * 硬件    : SCK=PB13  MOSI=PB15  CS=PB12  RST=PE0  DC=PE1  SPI2@6MHz Mode0
-  * 说明    : 初始化序列（0xCF/0xED/0xE8/0xCB/0xF7/0xEA/0xC0~0xC7/0x36/0x3A/
-  *            0xB1/0xB6/0xF2/0x26/0xE0/0xE1）取自厂商例程原值：
-  *            ref-vendor/MSP2807/extracted/1-Demo/Demo_STM32/
+  * 说明    : 初始化序列取自厂商例程
   *            Demo_STM32F429IGT6_Hardware_SPI/HARDWARE/LCD/lcd.c 的 LCD_Init()
   * 约定    : 每次传输都带超时（100ms），失败计数，绝不无限阻塞
   ******************************************************************************
@@ -14,7 +12,7 @@
 #include "ili9341.h"
 #include "spi.h"
 
-/* 单次 SPI 发送的最大字节数：用静态缓冲，不占栈 */
+/* 单次 SPI 发送的最大字节数（静态缓冲，不占栈） */
 #define LCD_TX_CHUNK      512
 /* SPI 传输超时（毫秒） */
 #define LCD_SPI_TIMEOUT   100
@@ -22,9 +20,7 @@
 static uint8_t  s_tx[LCD_TX_CHUNK];
 static uint32_t s_err;
 
-/* ============================ 底层 ============================ */
-
-/* 片选：assert=1 拉低选中，assert=0 释放 */
+/* 片选，低有效 */
 static inline void lcd_cs(uint8_t assert)
 {
     HAL_GPIO_WritePin(TFT_CS_GPIO_Port, TFT_CS_Pin,
@@ -71,7 +67,7 @@ static uint8_t lcd_wr_data(const uint8_t *buf, uint16_t len)
     return r;
 }
 
-/* 命令 + 参数（参数表用数组传给，避免一长串散装调用） */
+/* 命令 + 参数 */
 static void lcd_cmd_data(uint8_t cmd, const uint8_t *params, uint16_t n)
 {
     lcd_wr_cmd(cmd);
@@ -80,8 +76,6 @@ static void lcd_cmd_data(uint8_t cmd, const uint8_t *params, uint16_t n)
         lcd_wr_data(params, n);
     }
 }
-
-/* ============================ 初始化 ============================ */
 
 uint8_t ili9341_init(void)
 {
@@ -98,10 +92,7 @@ uint8_t ili9341_init(void)
     static const uint8_t p_c1[] = { 0x00 };                                         /* Power control 2 (BT) */
     static const uint8_t p_c5[] = { 0x30, 0x30 };                                   /* VCOM control 1 */
     static const uint8_t p_c7[] = { 0xB7 };                                         /* VCOM control 2 */
-    static const uint8_t p_36[] = { 0x08 };                                         /* MADCTL：只开 BGR，竖屏 0°。
-                                                                                     * 厂商给的就是这个值，实测这块屏也是它对：
-                                                                                     * 0x08 版面正、上下正。别再加 MX/MY 去"修字"——
-                                                                                     * 字镜像的根因在字模位序，不在 MADCTL。 */
+    static const uint8_t p_36[] = { 0x08 };                                         /* MADCTL：BGR，竖屏 0°（厂商原值） */
     static const uint8_t p_3a[] = { 0x55 };                                         /* 像素格式：16bit RGB565 */
     static const uint8_t p_b1[] = { 0x00, 0x1A };                                   /* Frame rate control */
     static const uint8_t p_b6[] = { 0x0A, 0xA2 };                                   /* Display function control */
@@ -154,51 +145,6 @@ uint8_t ili9341_init(void)
 
     return (uint8_t)(s_err - err0);
 }
-
-/* ============================ 显示方向 ============================ */
-
-/* MADCTL(0x36) 里 BGR / MX / MY 三位的四种组合：
- *   0x08 = BGR            原方向
- *   0x48 = BGR + MX       左右镜像
- *   0xC8 = BGR + MX + MY  180°（上下左右都翻）
- *   0x88 = BGR + MY       上下镜像
- * 这块屏的玻璃装配方向跟厂商例程不一样，光看手册定不下来，得实测挑一个。
- * 挑法见 main.c：点标题栏循环切换，哪个方向读字正就用哪个。
- * 注意四种都不动 MV 位，所以一直是竖屏 240x320。 */
-static const uint8_t s_orient[4] = { 0x08, 0x48, 0xC8, 0x88 };
-
-/* 当前方向在 s_orient[] 里的下标。开机值 0 = 0x08（实测这块屏要这个），
- * 与 ili9341_init() 里 p_36 写的一致，别单独改一处。 */
-static uint8_t s_orient_idx = 0u;
-
-static void ili9341_apply_orient(void)
-{
-    uint8_t v = s_orient[s_orient_idx];
-
-    lcd_cmd_data(0x36, &v, 1);
-
-    /* 换方向后把整屏窗口重设一遍，免得残留上一个方向留下的窗口范围 */
-    {
-        static const uint8_t x[] = { 0x00, 0x00, 0x00, 0xEF };
-        static const uint8_t y[] = { 0x00, 0x00, 0x01, 0x3F };
-        lcd_cmd_data(0x2A, x, sizeof x);
-        lcd_cmd_data(0x2B, y, sizeof y);
-    }
-}
-
-/* 切到下一种方向，返回新下标 */
-uint8_t ili9341_orient_next(void)
-{
-    s_orient_idx = (uint8_t)((s_orient_idx + 1u) & 3u);
-    ili9341_apply_orient();
-    return s_orient_idx;
-}
-
-uint8_t  ili9341_orient_get(void)    { return s_orient_idx; }
-
-uint16_t ili9341_orient_madctl(void) { return (uint16_t)s_orient[s_orient_idx]; }
-
-/* ============================ 绘图 ============================ */
 
 void ili9341_set_window(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)
 {
@@ -265,8 +211,6 @@ void ili9341_draw_pixel(uint16_t x, uint16_t y, uint16_t color)
     lcd_wr_data(s_tx, 2);
 }
 
-/* ==================== 图形：线 / 矩形 ==================== */
-
 void ili9341_draw_hline(uint16_t x, uint16_t y, uint16_t w, uint16_t color)
 {
     ili9341_fill_rect(x, y, w, 1, color);           /* 走批量填充，比逐点快得多 */
@@ -277,7 +221,7 @@ void ili9341_draw_vline(uint16_t x, uint16_t y, uint16_t h, uint16_t color)
     ili9341_fill_rect(x, y, 1, h, color);
 }
 
-/* 空心矩形，边框 1 像素 */
+/* 空心矩形（边框 1 像素） */
 void ili9341_draw_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color)
 {
     if (w == 0 || h == 0) return;
@@ -288,7 +232,7 @@ void ili9341_draw_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t 
     ili9341_draw_vline((uint16_t)(x + w - 1), y, h, color);
 }
 
-/* 任意两点连线：整数 Bresenham。步数有上限，不会死循环 */
+/* 任意两点连线，Bresenham 算法 */
 void ili9341_draw_line(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, uint16_t color)
 {
     int32_t dx = (int32_t)x1 - (int32_t)x0;
@@ -312,10 +256,7 @@ void ili9341_draw_line(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, uint1
     }
 }
 
-/* ==================== 文字（8x16 点阵） ==================== */
-
-/* 画一个字符。scale=1 原尺寸 8x16，2 就 16x32。宽高越界或一行放不下就整体不画。
- * 逐行发送：每行的像素先在 s_tx 里按 scale 横向铺开，再纵向重复 scale 遍。 */
+/* 画一个字符。scale=1 是 8x16，每行按 scale 横向铺开、纵向重复 */
 void ili9341_draw_char(uint16_t x, uint16_t y, char ch, uint16_t fg, uint16_t bg, uint8_t scale)
 {
     const uint8_t *glyph;
@@ -344,12 +285,7 @@ void ili9341_draw_char(uint16_t x, uint16_t y, char ch, uint16_t fg, uint16_t bg
         i = 0;
         for (cx = 0; cx < LCD_FONT_W; cx++)
         {
-            /* 位序：**低位对应行内最左像素**（0x01<<cx）。
-             * 本项目字库来自厂商 FONT.H 的 asc2_1608，那份字库就是低位在最左。
-             * 2026-09-16 踩过：这里原来写的是 0x80>>cx（高位在最左），
-             * 结果每个字母被左右镜像（"L" 的脚朝左、"C" 开口朝左），
-             * 而版面是正常的 —— 当时误以为是屏的方向问题，去改 MADCTL，
-             * 字母是正了但整个版面被翻掉。改回本行才两样都对。 */
+            /* 字模位序：bit0 对应行内最左像素 */
             uint16_t col = (bits & (uint16_t)(0x01u << cx)) ? fg : bg;
             uint16_t k;
 
@@ -367,7 +303,7 @@ void ili9341_draw_char(uint16_t x, uint16_t y, char ch, uint16_t fg, uint16_t bg
     }
 }
 
-/* 画一串字符，画到屏幕右边就停（不会绕行） */
+/* 画字符串，到屏幕右边停 */
 void ili9341_draw_string(uint16_t x, uint16_t y, const char *s, uint16_t fg, uint16_t bg, uint8_t scale)
 {
     uint16_t step;
@@ -384,11 +320,9 @@ void ili9341_draw_string(uint16_t x, uint16_t y, const char *s, uint16_t fg, uin
     }
 }
 
-/* ====================== 接线核对（配合万用表） ====================== */
-
 static void (*s_log)(const char *msg) = 0;
 
-/* 注册日志函数（main.c 把 uart_puts 传进来）；没注册就静默 */
+/* 注册日志函数，未注册则静默 */
 void ili9341_set_log(void (*fn)(const char *msg))
 {
     s_log = fn;
@@ -402,7 +336,7 @@ static void lcd_log(const char *msg)
     }
 }
 
-/* 慢速翻转一根线：cycles 次，每次高 500ms / 低 500ms */
+/* 慢速翻转一根线，1Hz */
 static void lcd_toggle_slow(GPIO_TypeDef *port, uint16_t pin, uint8_t cycles)
 {
     uint8_t i;
@@ -414,11 +348,10 @@ static void lcd_toggle_slow(GPIO_TypeDef *port, uint16_t pin, uint8_t cycles)
         HAL_GPIO_WritePin(port, pin, GPIO_PIN_RESET);
         HAL_Delay(500);
     }
-    HAL_GPIO_WritePin(port, pin, GPIO_PIN_SET);     /* 收尾回高：CS / RST 常态就是高 */
+    HAL_GPIO_WritePin(port, pin, GPIO_PIN_SET);     /* 收尾回高（CS/RST 常态为高） */
 }
 
-/* 持续发同一个字节 ms 毫秒：SCK 一直在翻转，MOSI 固定为该字节的每一位
- * 发 0x00 -> MOSI 恒低；发 0xFF -> MOSI 恒高。CS 保持高，屏不会理会这段数据。 */
+/* 连续发同一个字节 ms 毫秒：SCK 一直翻转，MOSI 恒为 0x00 或 0xFF（CS 高，屏不理会） */
 static void lcd_spi_burst(uint8_t fill, uint32_t ms)
 {
     uint32_t t0 = HAL_GetTick();
@@ -434,8 +367,7 @@ static void lcd_spi_burst(uint8_t fill, uint32_t ms)
     }
 }
 
-/* 接线核对：5 步、共 40 秒。串口提示量哪根线，万用表用直流 20V 档，
- * 黑笔抵板子 GND，红笔点目标线（把线从屏上拔出来点公头） */
+/* 接线核对：5 步共 40 秒，串口提示量哪根线，万用表直流档黑笔抵 GND */
 void ili9341_wiring_test(void)
 {
     lcd_log("=== LCD wiring check: probe each wire with a multimeter ===\r\n");
@@ -457,8 +389,6 @@ void ili9341_wiring_test(void)
 
     lcd_log("=== wiring check done ===\r\n");
 }
-
-/* ============================ 自检 ============================ */
 
 uint32_t ili9341_error_count(void)
 {
