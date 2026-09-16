@@ -43,5 +43,10 @@ void     ili9341_fill_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint1
 void     ili9341_draw_pixel(uint16_t x, uint16_t y, uint16_t color);
 uint32_t ili9341_error_count(void);          /* SPI 传输失败次数（自检打印用） */
 void     ili9341_error_reset(void);
+void     ili9341_set_log(void (*fn)(const char *msg));   /* 注册日志函数（main.c 传 uart_puts 进来） */
+
+/* 接线核对模式：逐根线慢速翻转 / 定值发送，配合万用表沿线核对。
+ * 屏点亮之后这个函数可以不再调用。 */
+void     ili9341_wiring_test(void);
 
 #endif /* __ILI9341_H */

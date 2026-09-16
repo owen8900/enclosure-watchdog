@@ -219,6 +219,80 @@ void ili9341_draw_pixel(uint16_t x, uint16_t y, uint16_t color)
     lcd_wr_data(s_tx, 2);
 }
 
+/* ====================== 接线核对（配合万用表） ====================== */
+
+static void (*s_log)(const char *msg) = 0;
+
+/* 注册日志函数（main.c 把 uart_puts 传进来）；没注册就静默 */
+void ili9341_set_log(void (*fn)(const char *msg))
+{
+    s_log = fn;
+}
+
+static void lcd_log(const char *msg)
+{
+    if (s_log != 0)
+    {
+        s_log(msg);
+    }
+}
+
+/* 慢速翻转一根线：cycles 次，每次高 500ms / 低 500ms */
+static void lcd_toggle_slow(GPIO_TypeDef *port, uint16_t pin, uint8_t cycles)
+{
+    uint8_t i;
+
+    for (i = 0; i < cycles; i++)
+    {
+        HAL_GPIO_WritePin(port, pin, GPIO_PIN_SET);
+        HAL_Delay(500);
+        HAL_GPIO_WritePin(port, pin, GPIO_PIN_RESET);
+        HAL_Delay(500);
+    }
+    HAL_GPIO_WritePin(port, pin, GPIO_PIN_SET);     /* 收尾回高：CS / RST 常态就是高 */
+}
+
+/* 持续发同一个字节 ms 毫秒：SCK 一直在翻转，MOSI 固定为该字节的每一位
+ * 发 0x00 -> MOSI 恒低；发 0xFF -> MOSI 恒高。CS 保持高，屏不会理会这段数据。 */
+static void lcd_spi_burst(uint8_t fill, uint32_t ms)
+{
+    uint32_t t0 = HAL_GetTick();
+    uint16_t i;
+
+    for (i = 0; i < LCD_TX_CHUNK; i++)
+    {
+        s_tx[i] = fill;
+    }
+    while ((HAL_GetTick() - t0) < ms)               /* 有界循环，不会无限跑 */
+    {
+        (void)HAL_SPI_Transmit(&hspi2, s_tx, LCD_TX_CHUNK, LCD_SPI_TIMEOUT);
+    }
+}
+
+/* 接线核对：5 步、共 40 秒。串口提示量哪根线，万用表用直流 20V 档，
+ * 黑笔抵板子 GND，红笔点目标线（把线从屏上拔出来点公头） */
+void ili9341_wiring_test(void)
+{
+    lcd_log("=== LCD wiring check: probe each wire with a multimeter ===\r\n");
+
+    lcd_log("Step 1/5: CS  (PB12) toggle 1Hz for 8s -> should swing 0V <-> 3.3V\r\n");
+    lcd_toggle_slow(TFT_CS_GPIO_Port, TFT_CS_Pin, 8);
+
+    lcd_log("Step 2/5: RST (PE0)  toggle 1Hz for 8s -> should swing 0V <-> 3.3V\r\n");
+    lcd_toggle_slow(TFT_RST_GPIO_Port, TFT_RST_Pin, 8);
+
+    lcd_log("Step 3/5: DC  (PE1)  toggle 1Hz for 8s -> should swing 0V <-> 3.3V\r\n");
+    lcd_toggle_slow(TFT_DC_GPIO_Port, TFT_DC_Pin, 8);
+
+    lcd_log("Step 4/5: SPI burst 0x00 for 8s -> SCK ~1.6V, SDI(MOSI) = 0V\r\n");
+    lcd_spi_burst(0x00, 8000);
+
+    lcd_log("Step 5/5: SPI burst 0xFF for 8s -> SCK ~1.6V, SDI(MOSI) ~3.3V\r\n");
+    lcd_spi_burst(0xFF, 8000);
+
+    lcd_log("=== wiring check done ===\r\n");
+}
+
 /* ============================ 自检 ============================ */
 
 uint32_t ili9341_error_count(void)

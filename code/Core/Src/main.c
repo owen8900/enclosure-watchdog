@@ -39,6 +39,8 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+/* 接线核对模式：1 = 上电先跑「逐根线慢速翻转」，配合万用表沿线路核对；核完改回 0 */
+#define LCD_WIRING_TEST 1
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -279,6 +281,11 @@ int main(void)
      * 串口打印字符串保持 ASCII，避免不同终端乱码。 */
     {
         uint8_t lcd_err;
+
+#if LCD_WIRING_TEST
+        ili9341_set_log(uart_puts);
+        ili9341_wiring_test();
+#endif
 
         uart_puts("TFT LCD    : ");
         lcd_err = ili9341_init();
