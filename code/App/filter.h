@@ -7,10 +7,10 @@
 #include <stdint.h>
 #include "app_config.h"
 
-/* ---------- 3 点中值滤波：滤掉单点毛刺 ---------- */
+/* 3 点中值滤波：滤掉单点毛刺 */
 float filter_median3(float a, float b, float c);
 
-/* ---------- 滑动平均 ---------- */
+/* 滑动平均 */
 typedef struct {
     float   buf[CFG_MAVG_N];
     uint8_t idx;
@@ -20,7 +20,7 @@ typedef struct {
 void  mavg_init(mavg_t *m);
 float mavg_push(mavg_t *m, float x);
 
-/* ---------- 滑动窗口最小二乘斜率 ---------- */
+/* 滑动窗口最小二乘斜率 */
 typedef struct {
     float   buf[CFG_R_WIN_N];
     uint8_t idx;

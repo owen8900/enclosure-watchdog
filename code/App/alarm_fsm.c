@@ -1,11 +1,8 @@
 /**
  * alarm_fsm.c —— 三级告警状态机实现
  *
- * 状态迁移规则：
- *   向上（升温）：NORMAL→WARN→ALARM→EMERGENCY，均需"持续 3 秒"去抖
- *                但 EMERGENCY 为安全侧动作，【立即】触发不去抖
- *   向下（降温）：WARN→NORMAL 需低于 40°C，ALARM→WARN 需低于 55°C（迟滞）
- *   硬件故障：   进入 ST_FAULT 并【锁存】，禁止自动恢复
+ * 向上迁移需持续 3 秒去抖；EMERGENCY 是安全侧动作，立即触发不去抖。
+ * 向下按迟滞解除。硬件故障进 ST_FAULT 并锁存，只能人工复位。
  */
 #include "alarm_fsm.h"
 #include "app_config.h"
@@ -43,7 +40,7 @@ alarm_state_t alarm_fsm_update(const alarm_input_t *in, uint32_t dt_ms)
     float          t;
     alarm_state_t  want;
 
-    /* ---- 0. 已锁存：只能人工复位 ---- */
+    /* 0. 已锁存，只能人工复位 */
     if (s_latched) {
         s_state = ST_FAULT;
         return s_state;
@@ -51,7 +48,7 @@ alarm_state_t alarm_fsm_update(const alarm_input_t *in, uint32_t dt_ms)
 
     t = in->t_load;
 
-    /* ---- 1. 紧急：安全侧动作，立即触发，不去抖 ---- */
+    /* 1. 紧急，立即触发不去抖 */
     if (t > CFG_EMERG_T) {
         if (s_state != ST_EMERGENCY) {
             s_state = ST_EMERGENCY;
@@ -60,7 +57,7 @@ alarm_state_t alarm_fsm_update(const alarm_input_t *in, uint32_t dt_ms)
         return s_state;
     }
 
-    /* ---- 2. 向上迁移：需持续去抖确认 ---- */
+    /* 2. 向上迁移需持续去抖 */
     want = s_state;
     if      (s_state == ST_NORMAL && t > CFG_WARN_T)   want = ST_WARN;
     else if (s_state == ST_WARN   && t > CFG_ALARM_T)  want = ST_ALARM;
@@ -76,7 +73,7 @@ alarm_state_t alarm_fsm_update(const alarm_input_t *in, uint32_t dt_ms)
         s_debounce_ms = 0;   /* 条件不满足则计时清零，实现"持续"语义 */
     }
 
-    /* ---- 3. 向下恢复：迟滞，不去抖（安全侧可以直接降级）---- */
+    /* 3. 向下恢复按迟滞解除 */
     if      (s_state == ST_WARN      && t < CFG_WARN_CLEAR_T)  s_state = ST_NORMAL;
     else if (s_state == ST_ALARM     && t < CFG_ALARM_CLEAR_T) s_state = ST_WARN;
     else if (s_state == ST_EMERGENCY && t < CFG_ALARM_T)       s_state = ST_ALARM;
