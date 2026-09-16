@@ -62,8 +62,14 @@ void Error_Handler(void);
 #define LED_B_GPIO_Port GPIOE
 #define LED_G_Pin GPIO_PIN_6
 #define LED_G_GPIO_Port GPIOE
+#define TFT_CS_Pin GPIO_PIN_12
+#define TFT_CS_GPIO_Port GPIOB
 #define LED_R_Pin GPIO_PIN_4
 #define LED_R_GPIO_Port GPIOB
+#define TFT_RST_Pin GPIO_PIN_0
+#define TFT_RST_GPIO_Port GPIOE
+#define TFT_DC_Pin GPIO_PIN_1
+#define TFT_DC_GPIO_Port GPIOE
 /* USER CODE BEGIN Private defines */
 
 /* USER CODE END Private defines */
