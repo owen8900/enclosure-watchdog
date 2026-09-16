@@ -363,47 +363,255 @@ static void xpt_log_u32(uint32_t v)
     xpt_log(buf);
 }
 
-/* ---- 上板自检 ---- */
+/* ---- 上板自检与标定 ---- */
 
-/* 每 200ms 打一行原始值，seconds 秒后自己结束（有界，不会卡住主流程）。
- * 两个用途：
- *   1) 证明触摸数据通路通了 —— 触笔按住时数值应随位置变化，
- *      松开时跑出窗口或乱跳；
- *   2) 取标定用的原始值 —— 触笔依次点在屏幕最左、最右、最上、最下，
- *      把那一刻的 X/Y 抄进 xpt2046_cal_t：
- *        屏幕左边 -> x_raw_at_0     屏幕右边 -> x_raw_at_max
- *        屏幕上边 -> y_raw_at_0     屏幕下边 -> y_raw_at_max
- *      抄完松开手再看几行，那些值就是「没按下」的实测范围，
- *      拿它去定 xpt2046.h 里的 XPT2046_VALID_MIN / MAX。 */
+/* 标定向导：让固件在读数稳住的时候自己把平均值锁下来打一行，
+ * 省得人眼盯着跳数抄 —— 手指本来就在动，单次采样也有噪声，看跳数取不准。
+ *
+ * 每次按下累计平均值和极值，满足下面任一条就捕获：
+ *   (a) 采样 >= XPT_PRESS_MIN 且 X/Y 的极差都 <= XPT_STABLE_TOL（干净，早捕获）
+ *   (b) 采样 >= XPT_PRESS_MAX（约 800ms，无论多吵都捕获，不会卡住人）
+ * 捕获后一直沉默到松手，所以串口不刷屏：一次按下对应一行。
+ * 打出来的 X/Y 极差就是这一次的质量指标，小才可信。
+ *
+ * 一轮四个点：LEFT / RIGHT / TOP / BOTTOM，各点住不放一下。
+ * 四点齐了打出可以直接抄进 s_cal 的块，然后重开一轮（抄错了可以重来）。
+ * 整个过程受 seconds 秒上限约束，到点自己结束，不会卡住主流程。 */
+
+#define XPT_STABLE_TOL    48u       /* 极差在这以内算读得干净（约 3 像素） */
+#define XPT_PRESS_MIN     6u        /* 至少累计这么多次采样才允许早捕获 */
+#define XPT_PRESS_MAX     16u       /* 撑到这么多次无论如何都捕获（16 x 50ms） */
+#define XPT_SAMPLE_MS     50u       /* 采样间隔 */
+#define XPT_PROMPT_MS     3000u     /* 空闲提示间隔 */
+#define XPT_RELEASE_N     3u        /* 连续几次跑出窗口算松手 */
+
+static const char *xpt_edge_name(uint8_t i)
+{
+    if (i == 0u) { return "LEFT"; }
+    if (i == 1u) { return "RIGHT"; }
+    if (i == 2u) { return "TOP"; }
+    return "BOTTOM";
+}
+
+/* 四点结果汇总。除了四个标定值，还打两个交叉项：
+ * 左右两点的 Y 应该几乎一样、上下两点的 X 应该几乎一样，
+ * 差得多就说明 X/Y 读错位了（要开 swap_xy）。 */
+static void xpt_calib_summary(const uint16_t cap[4][2], uint8_t round,
+                              uint8_t have_idle, uint16_t xmin, uint16_t xmax,
+                              uint16_t ymin, uint16_t ymax, uint16_t worst_spread)
+{
+    xpt_log("=== ROUND ");
+    xpt_log_u32((uint32_t)round);
+    xpt_log(" result: paste these into xpt2046.c ===\r\n");
+
+    xpt_log("x_raw_at_0   (LEFT)   = ");
+    xpt_log_u32(cap[0][0]);
+    xpt_log("\r\n");
+    xpt_log("x_raw_at_max (RIGHT)  = ");
+    xpt_log_u32(cap[1][0]);
+    xpt_log("\r\n");
+    xpt_log("y_raw_at_0   (TOP)    = ");
+    xpt_log_u32(cap[2][1]);
+    xpt_log("\r\n");
+    xpt_log("y_raw_at_max (BOTTOM) = ");
+    xpt_log_u32(cap[3][1]);
+    xpt_log("\r\n");
+
+    xpt_log("cross check (each pair should be nearly equal):\r\n");
+    xpt_log("  LEFT/RIGHT  Y: ");
+    xpt_log_u32(cap[0][1]);
+    xpt_log(" / ");
+    xpt_log_u32(cap[1][1]);
+    xpt_log("\r\n");
+    xpt_log("  TOP/BOTTOM  X: ");
+    xpt_log_u32(cap[2][0]);
+    xpt_log(" / ");
+    xpt_log_u32(cap[3][0]);
+    xpt_log("\r\n");
+
+    if (have_idle != 0u)
+    {
+        xpt_log("idle range (stylus up): X ");
+        xpt_log_u32(xmin);
+        xpt_log("..");
+        xpt_log_u32(xmax);
+        xpt_log("  Y ");
+        xpt_log_u32(ymin);
+        xpt_log("..");
+        xpt_log_u32(ymax);
+        xpt_log("\r\n");
+        xpt_log("  keep XPT2046_VALID_MIN/MAX outside this range\r\n");
+    }
+
+    xpt_log("worst spread this round = ");
+    xpt_log_u32(worst_spread);
+    xpt_log((worst_spread <= XPT_STABLE_TOL) ? "  (clean)\r\n"
+                                             : "  (noisy: hold the stylus more still, or redo)\r\n");
+
+    xpt_log("=== end of round ===\r\n");
+}
+
 void xpt2046_selftest(uint16_t seconds)
 {
-    uint32_t t0   = HAL_GetTick();
-    uint32_t last = t0;
+    uint32_t t0          = HAL_GetTick();
+    uint32_t last_sample = t0 - XPT_SAMPLE_MS;
+    uint32_t last_prompt = t0;
+    uint32_t sum_x       = 0u;
+    uint32_t sum_y       = 0u;
+    uint16_t cap[4][2];
+    uint16_t pmin_x      = 0u;
+    uint16_t pmax_x      = 0u;
+    uint16_t pmin_y      = 0u;
+    uint16_t pmax_y      = 0u;
+    uint16_t worst       = 0u;
+    uint16_t idle_xmin   = XPT2046_RAW_MAX;
+    uint16_t idle_xmax   = 0u;
+    uint16_t idle_ymin   = XPT2046_RAW_MAX;
+    uint16_t idle_ymax   = 0u;
+    uint8_t  have_idle   = 0u;
+    uint8_t  n_press     = 0u;
+    uint8_t  latched     = 0u;
+    uint8_t  out_n       = 0u;
+    uint8_t  step        = 0u;
+    uint8_t  round       = 1u;
 
-    xpt_log("--- XPT2046 raw scan: press the stylus on the 4 edges ---\r\n");
-    xpt_log("--- raw X / raw Y / verdict (TOUCH = inside the valid window) ---\r\n");
+    xpt_log("=== XPT2046 calibration: press the stylus on the named edge ===\r\n");
+    xpt_log("=== hold it still until [CAPTURE] shows up, then release ===\r\n");
 
     while ((HAL_GetTick() - t0) < (uint32_t)seconds * 1000u)
     {
         uint16_t rx, ry;
+        uint16_t sx, sy;
+        uint8_t  ready;
 
-        if ((HAL_GetTick() - last) < 200u)
+        if ((HAL_GetTick() - last_sample) < XPT_SAMPLE_MS)
         {
-            continue;                       /* 打太快看不清 */
+            continue;                       /* 还没到下一个采样点 */
         }
-        last = HAL_GetTick();
-
+        last_sample = HAL_GetTick();
         xpt2046_scan(&rx, &ry);
 
-        xpt_log("raw X=");
-        xpt_log_u32(rx);
+        if (xpt_in_window(rx, ry) == 0)
+        {
+            /* 跑出窗口 = 没按下。顺手统计空闲范围，标定完要拿它定有效窗口。 */
+            if (rx < idle_xmin) { idle_xmin = rx; }
+            if (rx > idle_xmax) { idle_xmax = rx; }
+            if (ry < idle_ymin) { idle_ymin = ry; }
+            if (ry > idle_ymax) { idle_ymax = ry; }
+            have_idle = 1u;
+
+            if (out_n < XPT_RELEASE_N)
+            {
+                out_n++;
+            }
+            if (out_n >= XPT_RELEASE_N)
+            {
+                if (latched != 0u)
+                {
+                    xpt_log("[RELEASE]\r\n");
+                }
+                latched = 0u;
+                n_press = 0u;
+            }
+
+            if ((HAL_GetTick() - last_prompt) >= XPT_PROMPT_MS)
+            {
+                last_prompt = HAL_GetTick();
+                xpt_log("waiting for ");
+                xpt_log(xpt_edge_name(step));
+                xpt_log(" edge   (");
+                xpt_log_u32(((uint32_t)seconds * 1000u - (HAL_GetTick() - t0)) / 1000u);
+                xpt_log("s left)\r\n");
+            }
+            continue;
+        }
+
+        out_n = 0u;                         /* 有读数落在窗口内 = 手按着 */
+
+        if (n_press == 0u)                  /* 本次按下的第一个采样 */
+        {
+            sum_x   = rx;
+            sum_y   = ry;
+            pmin_x  = rx;
+            pmax_x  = rx;
+            pmin_y  = ry;
+            pmax_y  = ry;
+            n_press = 1u;
+        }
+        else
+        {
+            sum_x += rx;
+            sum_y += ry;
+            if (rx < pmin_x) { pmin_x = rx; }
+            if (rx > pmax_x) { pmax_x = rx; }
+            if (ry < pmin_y) { pmin_y = ry; }
+            if (ry > pmax_y) { pmax_y = ry; }
+            if (n_press < XPT_PRESS_MAX)
+            {
+                n_press++;
+            }
+        }
+
+        if (latched != 0u)
+        {
+            continue;                       /* 这一点已经锁过，松手前不再出声 */
+        }
+
+        sx = (uint16_t)(pmax_x - pmin_x);
+        sy = (uint16_t)(pmax_y - pmin_y);
+
+        ready = 0u;
+        if ((n_press >= XPT_PRESS_MIN) && (sx <= XPT_STABLE_TOL) && (sy <= XPT_STABLE_TOL))
+        {
+            ready = 1u;                     /* 读数干净，早捕获 */
+        }
+        if (n_press >= XPT_PRESS_MAX)
+        {
+            ready = 1u;                     /* 撑够了，吵也照样捕获 */
+        }
+        if (ready == 0u)
+        {
+            continue;
+        }
+
+        cap[step][0] = (uint16_t)(sum_x / (uint32_t)n_press);
+        cap[step][1] = (uint16_t)(sum_y / (uint32_t)n_press);
+        latched      = 1u;
+
+        if (sx > worst) { worst = sx; }
+        if (sy > worst) { worst = sy; }
+
+        xpt_log("[CAPTURE ");
+        xpt_log_u32((uint32_t)(step + 1u));
+        xpt_log("/4] ");
+        xpt_log(xpt_edge_name(step));
+        xpt_log("  raw X=");
+        xpt_log_u32(cap[step][0]);
         xpt_log("  Y=");
-        xpt_log_u32(ry);
-        xpt_log((xpt_in_window(rx, ry) != 0) ? "  TOUCH" : "  idle");
-        xpt_log("\r\n");
+        xpt_log_u32(cap[step][1]);
+        xpt_log("  (n=");
+        xpt_log_u32((uint32_t)n_press);
+        xpt_log("  spread X=");
+        xpt_log_u32(sx);
+        xpt_log(" Y=");
+        xpt_log_u32(sy);
+        xpt_log(")\r\n");
+
+        step++;
+        if (step >= 4u)
+        {
+            xpt_calib_summary(cap, round, have_idle, idle_xmin, idle_xmax,
+                              idle_ymin, idle_ymax, worst);
+            step  = 0u;
+            round++;
+            worst = 0u;
+            xpt_log("--- round ");
+            xpt_log_u32((uint32_t)round);
+            xpt_log(": press LEFT again to redo, or wait out the timer ---\r\n");
+        }
     }
 
-    xpt_log("--- touch selftest done ---\r\n");
+    xpt_log("--- XPT2046 calibration done ---\r\n");
 }
 
 /* 接线核对：依次把 T_CS / T_CLK / T_DIN 以 1Hz 翻转 8 秒。

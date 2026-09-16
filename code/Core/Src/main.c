@@ -47,11 +47,11 @@
 
 /* 触摸（XPT2046）的两个开关：
  * XPT_WIRING_TEST    1 = 上电先把 T_CS/T_CLK/T_DIN 逐根慢翻转，配合万用表核对接线；平时 0
- * XPT_SELFTEST_SECONDS  > 0 = 上电打 N 秒原始值（触笔按住时数值会变），用来验收和标定；
+ * XPT_SELFTEST_SECONDS  > 0 = 上电跑 N 秒标定向导（见 xpt2046_selftest）；
  *                      正式固件里改回 0 —— 它是阻塞的。
- * 2026-09-16：首次上板验收时设 20，取完标定值改回 0。 */
+ * 2026-09-16：取标定值期间设 60（四个边够点两轮），抄完四个值再改回 0。 */
 #define XPT_WIRING_TEST        0
-#define XPT_SELFTEST_SECONDS   20
+#define XPT_SELFTEST_SECONDS   60
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -360,11 +360,10 @@ int main(void)
         uart_puts("TFT UI     : panel drawn\r\n");
     }
 
-    /* M6：触摸（XPT2046）自检
-     * 上电打 XPT_SELFTEST_SECONDS 秒原始值，串口每 200ms 一行。
-     * 验收判据：触笔按住时 raw X/Y 随位置变化，松开时判为 idle。
-     * 顺带标定：触笔依次点屏幕最左/最右/最上/最下，把那一刻的 X/Y 抄进
-     * xpt2046.c 的 s_cal；松开手那些行就是「没按下」的实测范围。
+    /* M6：触摸（XPT2046）自检 + 标定向导
+     * 上电跑 XPT_SELFTEST_SECONDS 秒：触笔依次点住 LEFT/RIGHT/TOP/BOTTOM
+     * 四条边，读数稳住的那一刻固件自己锁值并打 [CAPTURE]，一点一行、不刷屏。
+     * 四点凑齐打出可直接抄进 s_cal 的块（含空闲范围和交叉校验）。
      * 标定完把 XPT_SELFTEST_SECONDS 改回 0（它是阻塞的）。 */
     {
         xpt2046_set_log(uart_puts);
