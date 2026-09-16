@@ -86,10 +86,9 @@ static void ui_alarm_bar(uint8_t lvl)
     ili9341_draw_string(x, (uint16_t)(UI_ALARM_Y + 14), t, tc, color, UI_VALUE_SCALE);
 }
 
-void lcd_ui_draw_static(void)
+/* 静态框架：标题栏 + 标签 + 单位 + 分隔线（不清屏） */
+static void ui_draw_frame(void)
 {
-    ili9341_fill(UI_BG);
-
     /* 标题栏 */
     ili9341_fill_rect(0, UI_TITLE_Y, ILI9341_WIDTH, UI_TITLE_H, UI_TITLE_BG);
     ili9341_draw_string(8, 8, "CABINET GUARDIAN", ILI9341_WHITE, UI_TITLE_BG, 1);
@@ -107,6 +106,18 @@ void lcd_ui_draw_static(void)
     ili9341_draw_hline(0, 36, ILI9341_WIDTH, UI_LINE);
     ili9341_draw_hline(0, 176, ILI9341_WIDTH, UI_LINE);
     ili9341_draw_hline(0, 248, ILI9341_WIDTH, UI_LINE);
+}
+
+void lcd_ui_draw_static(void)
+{
+    ili9341_fill(UI_BG);
+    ui_draw_frame();
+}
+
+/* 重画面板内容但不清整屏，用来擦掉屏幕上临时画的东西 */
+void lcd_ui_repaint(void)
+{
+    ui_draw_frame();
 }
 
 void lcd_ui_update(const lcd_ui_data_t *d)

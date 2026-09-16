@@ -282,9 +282,23 @@ static void ui_refresh(uint32_t cycle, uint32_t spi_err, uint8_t sd_ok)
 
 #define TOUCH_STATUS_Y    304u      /* 触摸状态行占用屏幕最底下 16 像素 */
 #define TOUCH_MARK_COLOR  ILI9341_RED
+#define TOUCH_MARK_TTL_MS 250u      /* 十字在手松开后亮多久就擦掉 */
 
 /* 累计触摸次数 */
 static uint32_t g_touch_n = 0u;
+
+/* 十字的状态：g_mark_on=1 表示屏上还留着十字，g_mark_ms 是最后一次画的时间。
+ * g_mark_x0..x1 / y0..y1 是这一轮画过的所有十字的包围盒（拖一笔会画一串），
+ * 擦的时候按这个范围涂黑。 */
+static uint8_t  g_mark_on = 0u;
+static uint32_t g_mark_ms = 0u;
+static uint8_t  g_touch_down = 0u;      /* 这一次触摸是否还按着 */
+static uint16_t g_mark_x0 = 0u;
+static uint16_t g_mark_x1 = 0u;
+static uint16_t g_mark_y0 = 0u;
+static uint16_t g_mark_y1 = 0u;
+static uint16_t g_last_px = 0u;         /* 松手时的最终坐标，擦完十字要补回状态行 */
+static uint16_t g_last_py = 0u;
 
 /* 往 dst 尾部追加 src，返回追加的字节数 */
 static int append_str(char *dst, const char *src)
@@ -312,6 +326,24 @@ static void touch_marker(uint16_t px, uint16_t py)
 
     ili9341_draw_hline((uint16_t)(x - 4u), y, 9u, TOUCH_MARK_COLOR);
     ili9341_fill_rect(x, (uint16_t)(y - 4u), 1u, 9u, TOUCH_MARK_COLOR);
+
+    if (g_mark_on == 0u)                    /* 这一轮的第一笔：包围盒从它开始 */
+    {
+        g_mark_x0 = (uint16_t)(x - 4u);
+        g_mark_x1 = (uint16_t)(x + 4u);
+        g_mark_y0 = (uint16_t)(y - 4u);
+        g_mark_y1 = (uint16_t)(y + 4u);
+    }
+    else
+    {
+        if ((uint16_t)(x - 4u) < g_mark_x0) { g_mark_x0 = (uint16_t)(x - 4u); }
+        if ((uint16_t)(x + 4u) > g_mark_x1) { g_mark_x1 = (uint16_t)(x + 4u); }
+        if ((uint16_t)(y - 4u) < g_mark_y0) { g_mark_y0 = (uint16_t)(y - 4u); }
+        if ((uint16_t)(y + 4u) > g_mark_y1) { g_mark_y1 = (uint16_t)(y + 4u); }
+    }
+
+    g_mark_on = 1u;
+    g_mark_ms = HAL_GetTick();
 }
 
 /* 底部状态行：最后一次的像素坐标 + 累计次数 */
@@ -368,7 +400,10 @@ static void touch_poll(void)
     {
         if (down_before != 0u)                  /* 松手：记下最终坐标 */
         {
-            down_before = 0u;
+            down_before  = 0u;
+            g_touch_down = 0u;
+            g_last_px    = last_x;
+            g_last_py    = last_y;
             touch_status(last_x, last_y);
             touch_log_line(last_x, last_y, last_rx, last_ry);
         }
@@ -377,7 +412,8 @@ static void touch_poll(void)
 
     if (down_before == 0u)                      /* 刚按下 */
     {
-        down_before = 1u;
+        down_before  = 1u;
+        g_touch_down = 1u;
         g_touch_n++;
     }
     else
@@ -395,6 +431,38 @@ static void touch_poll(void)
     last_rx = rx;
     last_ry = ry;
     touch_marker(px, py);
+}
+
+/* 十字到点自己擦掉。屏的 SDO(MISO) 没接线、读不回显存，
+ * 只能先把十字走过的范围涂黑，再把面板内容重画回去盖住被涂掉的部分。
+ * 手还按着时不擦，免得重画这一下把触摸扫描挡住、漏掉下一次点按。 */
+static void touch_marker_tick(void)
+{
+    if (g_mark_on == 0u)
+    {
+        return;
+    }
+
+    if (g_touch_down != 0u)                 /* 按着就先留着，松手再算时间 */
+    {
+        g_mark_ms = HAL_GetTick();
+        return;
+    }
+    if ((HAL_GetTick() - g_mark_ms) < TOUCH_MARK_TTL_MS)
+    {
+        return;
+    }
+
+    g_mark_on = 0u;
+    ili9341_fill_rect(g_mark_x0, g_mark_y0,
+                      (uint16_t)(g_mark_x1 - g_mark_x0 + 1u),
+                      (uint16_t)(g_mark_y1 - g_mark_y0 + 1u), ILI9341_BLACK);
+    lcd_ui_repaint();
+    ui_refresh(g_cycle, ili9341_error_count(), 1u);
+    if (g_touch_n != 0u)
+    {
+        touch_status(g_last_px, g_last_py);     /* 底行不在面板范围内，单独补回 */
+    }
 }
 
 int main(void)
@@ -727,6 +795,7 @@ int main(void)
     {
         t_touch = now;
         touch_poll();
+        touch_marker_tick();
     }
 
     /* 心跳：串口一行 + 追加进 SD 日志 */

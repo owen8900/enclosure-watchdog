@@ -39,6 +39,7 @@ typedef struct
 } lcd_ui_data_t;
 
 void lcd_ui_draw_static(void);                  /* 清屏 + 标题 + 标签 + 框架（只在开机画一次） */
+void lcd_ui_repaint(void);                      /* 同上但不清屏：擦临时图形用 */
 void lcd_ui_update(const lcd_ui_data_t *d);     /* 刷数值 / 色块 / 告警条 / 状态行 */
 
 #endif /* __LCD_UI_H */
