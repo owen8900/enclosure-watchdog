@@ -45,12 +45,13 @@
  * 2026-09-16：屏不亮就是靠它定位到一根线松动，核对完已改回 0。 */
 #define LCD_WIRING_TEST 0
 
-/* 触摸（XPT2046）的两个开关：
+/* 触摸（XPT2046）三个开关：
  * XPT_WIRING_TEST    1 = 上电先把 T_CS/T_CLK/T_DIN 逐根慢翻转，配合万用表核对接线；平时 0
- * XPT_SELFTEST_SECONDS  > 0 = 上电跑 N 秒标定向导（见 xpt2046_selftest）；
- *                      正式固件里改回 0 —— 它是阻塞的。
- * 2026-09-16：取标定值期间设 60（四个边够点两轮），抄完四个值再改回 0。 */
+ * XPT_SELFTEST_MODE  1 = 标定向导（取 s_cal 用）  2 = 五点验收（验证 s_cal 准不准）
+ * XPT_SELFTEST_SECONDS  > 0 = 上电跑 N 秒向导；正式固件里改回 0 —— 它是阻塞的。
+ * 2026-09-16：量标定值时用 1 跑了一轮；现在填完 s_cal，改用 2 验收。 */
 #define XPT_WIRING_TEST        0
+#define XPT_SELFTEST_MODE      2
 #define XPT_SELFTEST_SECONDS   60
 /* USER CODE END PD */
 
@@ -360,11 +361,11 @@ int main(void)
         uart_puts("TFT UI     : panel drawn\r\n");
     }
 
-    /* M6：触摸（XPT2046）自检 + 标定向导
-     * 上电跑 XPT_SELFTEST_SECONDS 秒：触笔依次点住 LEFT/RIGHT/TOP/BOTTOM
-     * 四条边，读数稳住的那一刻固件自己锁值并打 [CAPTURE]，一点一行、不刷屏。
-     * 四点凑齐打出可直接抄进 s_cal 的块（含空闲范围和交叉校验）。
-     * 标定完把 XPT_SELFTEST_SECONDS 改回 0（它是阻塞的）。 */
+    /* M6：触摸（XPT2046）自检。XPT_SELFTEST_MODE 决定跑哪个向导，
+     * 两个都受 XPT_SELFTEST_SECONDS 秒上限约束、都是阻塞的，正式固件里把秒数改回 0：
+     *   1 = 标定向导：点住四条边，读数稳住时固件自己锁值打 [CAPTURE]，
+     *       四点齐了给出可直接抄进 s_cal 的块（含空闲范围和交叉校验）；
+     *   2 = 五点验收：点住四个角加正中，固件映射成像素后跟期望值比，直接 PASS/FAIL。 */
     {
         xpt2046_set_log(uart_puts);
         xpt2046_init();
@@ -375,7 +376,11 @@ int main(void)
 #endif
 
 #if XPT_SELFTEST_SECONDS > 0
+    #if XPT_SELFTEST_MODE == 1
         xpt2046_selftest(XPT_SELFTEST_SECONDS);
+    #elif XPT_SELFTEST_MODE == 2
+        xpt2046_verify(XPT_SELFTEST_SECONDS);
+    #endif
 #endif
     }
 

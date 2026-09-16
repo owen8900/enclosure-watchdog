@@ -172,15 +172,24 @@ static uint8_t xpt_in_window(uint16_t x, uint16_t y)
 
 /* ---- 标定与映射 ---- */
 
-/* 默认标定是占位值：映射出来的像素坐标现在没有意义，必须上板量过再改。
- * 量法见 xpt2046_selftest() 的注释。 */
+/* 标定值：2026-09-16 用 xpt2046_selftest() 的点向导在欧文板子上量出来的。
+ * 他点的是四个角（一个角同时给出 X 和 Y 的量程端点），每个角都被独立测了两次：
+ *
+ *   左上 (268, 320) / 左下 (294, 3792)     右上 (3797, 280) / 右下 (3766, 3791)
+ *
+ * 同一边的两次测量彼此差 1~40 个数（约 1~3 像素），一致性好，所以取平均：
+ *   X: 左边 (268+294)/2 = 281   右边 (3797+3766)/2 = 3782
+ *   Y: 上边 (320+280)/2 = 300   下边 (3792+3791)/2 = 3792
+ * 面板有效区约 3500 x 3492 个数，接近正方形（这类 2.8 寸屏就是这样）。
+ *
+ * ⚠️ 这几个数只对这块屏有效（电阻屏的离散性很大），换屏必须重量。 */
 static xpt2046_cal_t s_cal =
 {
-    0,      /* x_raw_at_0   —— 触笔点屏幕左边（X=0）时的原始 X */
-    4095,   /* x_raw_at_max —— 触笔点屏幕右边（X=239）时的原始 X */
-    0,      /* y_raw_at_0   —— 触笔点屏幕顶部（Y=0）时的原始 Y */
-    4095,   /* y_raw_at_max —— 触笔点屏幕底部（Y=319）时的原始 Y */
-    0       /* swap_xy      —— 实测 X/Y 反了才置 1 */
+    281,    /* x_raw_at_0   —— 触笔点屏幕左边（X=0）时的原始 X */
+    3782,   /* x_raw_at_max —— 触笔点屏幕右边（X=239）时的原始 X */
+    300,    /* y_raw_at_0   —— 触笔点屏幕顶部（Y=0）时的原始 Y */
+    3792,   /* y_raw_at_max —— 触笔点屏幕底部（Y=319）时的原始 Y */
+    0       /* swap_xy      —— 实测 X/Y 没反（横拖时 X 变 Y 稳），保持 0 */
 };
 
 /* 线性映射：raw_at_0 映射到 0 像素，raw_at_max 映射到 span-1 像素。
@@ -661,6 +670,231 @@ void xpt2046_selftest(uint16_t seconds)
     }
 
     xpt_log("--- XPT2046 calibration done ---\r\n");
+}
+
+/* ---- 五点验收 ---- */
+
+/* 标定准不准不该靠眼睛估。点住提示的位置，固件把它映射成像素坐标，
+ * 跟期望值比对，直接给 PASS/FAIL。
+ * 五个点覆盖左上、右上、左下、右下、正中 —— 方向反了、轴换错了、
+ * 量程不准，都会在这五个点上暴露出来。
+ * 捕获判据跟标定向导一样（稳住就早捕获，撑到 800ms 必捕获），
+ * 所以不用眼睛看跳数。 */
+
+#define XPT_VERIFY_TOL   12u        /* 判定容差（像素），约 3 毫米 */
+
+/* 原始值 -> 像素。swap_xy 的处理跟 xpt2046_read_screen() 保持一致。 */
+static void xpt_raw_to_px(uint16_t rx, uint16_t ry, uint16_t *px, uint16_t *py)
+{
+    uint16_t t;
+
+    if (s_cal.swap_xy != 0)
+    {
+        t  = rx;
+        rx = ry;
+        ry = t;
+    }
+
+    if (px != 0)
+    {
+        *px = xpt_map(rx, s_cal.x_raw_at_0, s_cal.x_raw_at_max, XPT2046_SCREEN_W);
+    }
+    if (py != 0)
+    {
+        *py = xpt_map(ry, s_cal.y_raw_at_0, s_cal.y_raw_at_max, XPT2046_SCREEN_H);
+    }
+}
+
+void xpt2046_verify(uint16_t seconds)
+{
+    static const char *vname[5] =
+    {
+        "TOP-LEFT", "TOP-RIGHT", "BOTTOM-LEFT", "BOTTOM-RIGHT", "CENTER"
+    };
+    static const uint16_t vexp_x[5] = { 0u, 239u, 0u, 239u, 120u };
+    static const uint16_t vexp_y[5] = { 0u, 0u, 319u, 319u, 160u };
+
+    uint32_t t0          = HAL_GetTick();
+    uint32_t last_sample = t0 - XPT_SAMPLE_MS;
+    uint32_t last_prompt = t0;
+    uint32_t sum_x       = 0u;
+    uint32_t sum_y       = 0u;
+    uint16_t pmin_x      = 0u;
+    uint16_t pmax_x      = 0u;
+    uint16_t pmin_y      = 0u;
+    uint16_t pmax_y      = 0u;
+    uint8_t  n_press     = 0u;
+    uint8_t  latched     = 0u;
+    uint8_t  out_n       = 0u;
+    uint8_t  step        = 0u;
+    uint8_t  pass_n      = 0u;
+
+    xpt_log("=== XPT2046 verify: 4 corners + center, hold still on each ===\r\n");
+    xpt_log("=== tolerance ");
+    xpt_log_u32(XPT_VERIFY_TOL);
+    xpt_log(" px ===\r\n");
+
+    while ((HAL_GetTick() - t0) < (uint32_t)seconds * 1000u)
+    {
+        uint16_t rx, ry;
+        uint16_t sx, sy;
+        uint8_t  ready;
+
+        if ((HAL_GetTick() - last_sample) < XPT_SAMPLE_MS)
+        {
+            continue;
+        }
+        last_sample = HAL_GetTick();
+        xpt2046_scan(&rx, &ry);
+
+        if (xpt_in_window(rx, ry) == 0)
+        {
+            if (out_n < XPT_RELEASE_N)
+            {
+                out_n++;
+            }
+            if (out_n >= XPT_RELEASE_N)
+            {
+                if (latched != 0u)
+                {
+                    xpt_log("[RELEASE]\r\n");
+                }
+                latched = 0u;
+                n_press = 0u;
+            }
+
+            if ((HAL_GetTick() - last_prompt) >= XPT_PROMPT_MS)
+            {
+                last_prompt = HAL_GetTick();
+                xpt_log("touch ");
+                xpt_log(vname[step]);
+                xpt_log("   (");
+                xpt_log_u32(((uint32_t)seconds * 1000u - (HAL_GetTick() - t0)) / 1000u);
+                xpt_log("s left)\r\n");
+            }
+            continue;
+        }
+
+        out_n = 0u;
+
+        if (n_press == 0u)
+        {
+            sum_x   = rx;
+            sum_y   = ry;
+            pmin_x  = rx;
+            pmax_x  = rx;
+            pmin_y  = ry;
+            pmax_y  = ry;
+            n_press = 1u;
+        }
+        else
+        {
+            sum_x += rx;
+            sum_y += ry;
+            if (rx < pmin_x) { pmin_x = rx; }
+            if (rx > pmax_x) { pmax_x = rx; }
+            if (ry < pmin_y) { pmin_y = ry; }
+            if (ry > pmax_y) { pmax_y = ry; }
+            if (n_press < XPT_PRESS_MAX)
+            {
+                n_press++;
+            }
+        }
+
+        if (latched != 0u)
+        {
+            continue;
+        }
+
+        sx = (uint16_t)(pmax_x - pmin_x);
+        sy = (uint16_t)(pmax_y - pmin_y);
+
+        ready = 0u;
+        if ((n_press >= XPT_PRESS_MIN) && (sx <= XPT_STABLE_TOL) && (sy <= XPT_STABLE_TOL))
+        {
+            ready = 1u;
+        }
+        if (n_press >= XPT_PRESS_MAX)
+        {
+            ready = 1u;
+        }
+        if (ready == 0u)
+        {
+            continue;
+        }
+
+        {
+            uint16_t avg_x = (uint16_t)(sum_x / (uint32_t)n_press);
+            uint16_t avg_y = (uint16_t)(sum_y / (uint32_t)n_press);
+            uint16_t px, py, dx, dy;
+
+            xpt_raw_to_px(avg_x, avg_y, &px, &py);
+            dx = xpt_diff(px, vexp_x[step]);
+            dy = xpt_diff(py, vexp_y[step]);
+
+            latched = 1u;
+            if ((dx <= XPT_VERIFY_TOL) && (dy <= XPT_VERIFY_TOL))
+            {
+                pass_n++;
+                xpt_log("[VERIFY ");
+                xpt_log_u32((uint32_t)(step + 1u));
+                xpt_log("/5] ");
+                xpt_log(vname[step]);
+                xpt_log("  raw ");
+                xpt_log_u32(avg_x);
+                xpt_log(",");
+                xpt_log_u32(avg_y);
+                xpt_log(" -> px ");
+                xpt_log_u32(px);
+                xpt_log(",");
+                xpt_log_u32(py);
+                xpt_log("  expect ");
+                xpt_log_u32(vexp_x[step]);
+                xpt_log(",");
+                xpt_log_u32(vexp_y[step]);
+                xpt_log("  PASS\r\n");
+            }
+            else
+            {
+                xpt_log("[VERIFY ");
+                xpt_log_u32((uint32_t)(step + 1u));
+                xpt_log("/5] ");
+                xpt_log(vname[step]);
+                xpt_log("  raw ");
+                xpt_log_u32(avg_x);
+                xpt_log(",");
+                xpt_log_u32(avg_y);
+                xpt_log(" -> px ");
+                xpt_log_u32(px);
+                xpt_log(",");
+                xpt_log_u32(py);
+                xpt_log("  expect ");
+                xpt_log_u32(vexp_x[step]);
+                xpt_log(",");
+                xpt_log_u32(vexp_y[step]);
+                xpt_log("  FAIL  dev ");
+                xpt_log_u32(dx);
+                xpt_log(",");
+                xpt_log_u32(dy);
+                xpt_log("\r\n");
+            }
+
+            step++;
+            if (step >= 5u)
+            {
+                xpt_log("=== verify result: ");
+                xpt_log_u32((uint32_t)pass_n);
+                xpt_log("/5 PASS");
+                xpt_log((pass_n == 5u) ? "  (calibration OK)\r\n"
+                                       : "  (calibration needs redoing)\r\n");
+                step   = 0u;
+                pass_n = 0u;
+                xpt_log("--- round done: touch TOP-LEFT again to redo ---\r\n");
+            }
+        }
+    }
+
+    xpt_log("--- XPT2046 verify done ---\r\n");
 }
 
 /* 接线核对：依次把 T_CS / T_CLK / T_DIN 以 1Hz 翻转 8 秒。

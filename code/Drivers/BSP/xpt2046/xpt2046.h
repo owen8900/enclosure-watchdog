@@ -58,6 +58,7 @@ void                 xpt2046_set_cal(const xpt2046_cal_t *cal);
 const xpt2046_cal_t *xpt2046_get_cal(void);
 void                 xpt2046_set_log(void (*fn)(const char *msg));
 void                 xpt2046_selftest(uint16_t seconds);
+void                 xpt2046_verify(uint16_t seconds);
 void                 xpt2046_wiring_test(void);
 
 #endif /* __XPT2046_H */
