@@ -52,7 +52,7 @@
  * 2026-09-16：量标定值时用 1 跑了一轮；现在填完 s_cal，改用 2 验收。 */
 #define XPT_WIRING_TEST        0
 #define XPT_SELFTEST_MODE      2
-#define XPT_SELFTEST_SECONDS   60
+#define XPT_SELFTEST_SECONDS   0
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -277,6 +277,120 @@ static void ui_refresh(uint32_t cycle, uint32_t spi_err, uint8_t sd_ok)
   * @brief  The application entry point.
   * @retval int
   */
+/* ---- M7 触摸演示（① 画点） ---- */
+
+/* 各动作的周期：谁都不阻塞谁（见主循环里的时间片调度） */
+#define TICK_LED_MS       300u      /* RGB 每色亮多久 */
+#define TICK_TOUCH_MS      20u      /* 触摸扫描周期：50Hz 手感够，也不占 CPU */
+#define TICK_HB_MS       1000u      /* 心跳：串口一行 + 追加进 SD 日志 */
+#define TICK_UI_MS      10000u      /* 面板刷新（原来是每 10 轮，约 9 秒一次） */
+
+#define TOUCH_STATUS_Y    304u      /* 触摸状态行占用屏幕最底下 16 像素 */
+#define TOUCH_MARK_COLOR  ILI9341_RED
+
+/* 累计触摸次数（点标题栏清屏时归零） */
+static uint32_t g_touch_n = 0u;
+
+/* 往 dst 尾部追加 src，返回追加的字节数 */
+static int append_str(char *dst, const char *src)
+{
+    int n = 0;
+
+    while (src[n] != '\0')
+    {
+        dst[n] = src[n];
+        n++;
+    }
+    return n;
+}
+
+/* 在 (px,py) 画一个 9x9 的十字。坐标先夹进屏幕：
+ * 十字向四周各伸 4 像素，不夹的话窗口会写到屏幕外去。 */
+static void touch_marker(uint16_t px, uint16_t py)
+{
+    uint16_t x = px;
+    uint16_t y = py;
+
+    if (x < 4u)                       { x = 4u; }
+    if (x > (ILI9341_WIDTH - 5u))     { x = (uint16_t)(ILI9341_WIDTH - 5u); }
+    if (y < 4u)                       { y = 4u; }
+    if (y > (ILI9341_HEIGHT - 5u))    { y = (uint16_t)(ILI9341_HEIGHT - 5u); }
+
+    ili9341_draw_hline((uint16_t)(x - 4u), y, 9u, TOUCH_MARK_COLOR);
+    ili9341_fill_rect(x, (uint16_t)(y - 4u), 1u, 9u, TOUCH_MARK_COLOR);
+}
+
+/* 底部状态行：最后一次的像素坐标 + 累计次数 */
+static void touch_status(uint16_t px, uint16_t py)
+{
+    char buf[32];
+    int  n = 0;
+
+    n += append_str(buf + n, "TOUCH x=");
+    n += u32_to_str(px, buf + n);
+    n += append_str(buf + n, " y=");
+    n += u32_to_str(py, buf + n);
+    n += append_str(buf + n, "  n=");
+    n += u32_to_str(g_touch_n, buf + n);
+    buf[n] = '\0';
+
+    ili9341_fill_rect(0u, TOUCH_STATUS_Y, ILI9341_WIDTH, 16u, ILI9341_BLACK);
+    ili9341_draw_string(4u, TOUCH_STATUS_Y, buf, ILI9341_WHITE, ILI9341_BLACK, 1u);
+}
+
+/* 触摸轮询（每 TICK_TOUCH_MS 调一次）。
+ * 按下就画十字、跟着手指走；松手把最终坐标记到状态行；
+ * 点标题栏那一条（y < 32）＝ 擦掉重画（面板重画一遍，当清屏用）。
+ * 用途有两个：一是演示，二是**验收时间片改造** —— 十字跟手就说明触摸扫描
+ * 没被 LED/写卡/刷屏那些动作的延时卡住。 */
+static void touch_poll(void)
+{
+    static uint8_t  down_before = 0u;
+    static uint16_t last_x      = 0u;
+    static uint16_t last_y      = 0u;
+    uint16_t px = 0u, py = 0u;
+    uint16_t dx, dy;
+    uint8_t  down;
+
+    down = xpt2046_read_screen_fast(&px, &py);
+
+    if (down == 0u)
+    {
+        if (down_before != 0u)                  /* 松手：记下最终坐标 */
+        {
+            down_before = 0u;
+            touch_status(last_x, last_y);
+        }
+        return;
+    }
+
+    if (down_before == 0u)                      /* 刚按下 */
+    {
+        down_before = 1u;
+        g_touch_n++;
+        if (py < 32u)                           /* 标题栏：清屏 */
+        {
+            lcd_ui_draw_static();
+            ui_refresh(g_cycle, ili9341_error_count(), 1u);
+            g_touch_n = 0u;
+            return;
+        }
+    }
+    else
+    {
+        dx = (last_x > px) ? (uint16_t)(last_x - px) : (uint16_t)(px - last_x);
+        dy = (last_y > py) ? (uint16_t)(last_y - py) : (uint16_t)(py - last_y);
+        if ((dx < 3u) && (dy < 3u))
+        {
+            return;                             /* 没挪几个像素就不重画，省总线 */
+        }
+    }
+
+    last_x = px;
+    last_y = py;
+    touch_marker(px, py);
+}
+
 int main(void)
 {
   /* USER CODE BEGIN 1 */
@@ -561,6 +675,14 @@ int main(void)
 
   /* USER CODE END 2 */
 
+  /* M2/M7 时间片主循环的节拍。原来整轮用 HAL_Delay 串起来（光 RGB 三色就 0.9 秒），
+     触摸扫描夹在里面会漏按 —— 人点一下几十毫秒，程序正卡在延时里就丢了。 */
+  uint32_t t_led    = HAL_GetTick();
+  uint32_t t_touch  = HAL_GetTick();
+  uint32_t t_hb     = HAL_GetTick();
+  uint32_t t_ui     = HAL_GetTick();
+  uint8_t  led_step = 0u;
+
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
@@ -568,67 +690,76 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	/* M2：RGB 轮闪（低电平点亮） */
-	HAL_GPIO_WritePin(LED_R_GPIO_Port, LED_R_Pin, GPIO_PIN_RESET);  /* 红亮 */
-	HAL_Delay(300);
-	HAL_GPIO_WritePin(LED_R_GPIO_Port, LED_R_Pin, GPIO_PIN_SET);    /* 红灭 */
+    uint32_t now = HAL_GetTick();
 
-	HAL_GPIO_WritePin(LED_G_GPIO_Port, LED_G_Pin, GPIO_PIN_RESET);  /* 绿亮 */
-	HAL_Delay(300);
-	HAL_GPIO_WritePin(LED_G_GPIO_Port, LED_G_Pin, GPIO_PIN_SET);    /* 绿灭 */
+    /* M2：RGB 轮闪（低电平点亮），每 TICK_LED_MS 换一种颜色 */
+    if ((now - t_led) >= TICK_LED_MS)
+    {
+        t_led = now;
+        HAL_GPIO_WritePin(LED_R_GPIO_Port, LED_R_Pin, GPIO_PIN_SET);      /* 全灭 */
+        HAL_GPIO_WritePin(LED_G_GPIO_Port, LED_G_Pin, GPIO_PIN_SET);
+        HAL_GPIO_WritePin(LED_B_GPIO_Port, LED_B_Pin, GPIO_PIN_SET);
+        if (led_step == 0u)                    { HAL_GPIO_WritePin(LED_R_GPIO_Port, LED_R_Pin, GPIO_PIN_RESET); }
+        else if (led_step == 1u)               { HAL_GPIO_WritePin(LED_G_GPIO_Port, LED_G_Pin, GPIO_PIN_RESET); }
+        else                                   { HAL_GPIO_WritePin(LED_B_GPIO_Port, LED_B_Pin, GPIO_PIN_RESET); }
+        led_step = (uint8_t)((led_step + 1u) % 3u);
+    }
 
-	HAL_GPIO_WritePin(LED_B_GPIO_Port, LED_B_Pin, GPIO_PIN_RESET);  /* 蓝亮 */
-	HAL_Delay(300);
-	HAL_GPIO_WritePin(LED_B_GPIO_Port, LED_B_Pin, GPIO_PIN_SET);    /* 蓝灭 */
+    /* M7：触摸轮询（每 20ms 一次，跟手的关键） */
+    if ((now - t_touch) >= TICK_TOUCH_MS)
+    {
+        t_touch = now;
+        touch_poll();
+    }
 
-	/* 心跳：每轮 RGB 打一行；同一行内容后面要追加进 SD 卡日志 */
-	g_cycle++;
-	{
-		char line[20];                              /* 6 + 10 + 2 + 1 = 19 */
-		int  n = build_cycle_line(g_cycle, line);
+    /* 心跳：串口一行 + 追加进 SD 日志（跟改前逐字节相同） */
+    if ((now - t_hb) >= TICK_HB_MS)
+    {
+        char line[20];
+        int  n;
 
-		uart_puts(line);                            /* 串口输出与改前逐字节相同 */
+        t_hb = now;
+        g_cycle++;
+        n = build_cycle_line(g_cycle, line);
+        uart_puts(line);
 
-	
-		{
-			FRESULT fr;
-			UINT    bw = 0;
+        {
+            FRESULT fr;
+            UINT    bw = 0;
 
-			fr = f_open(&s_fil, "0:/LOG.TXT", FA_WRITE | FA_OPEN_APPEND);   
-			if (fr != FR_OK)
-			{
-
-
-                    uart_puts("FATFS write: FAILED (open) fr=");
-                    uart_put_u32((uint32_t)fr);
-                    uart_puts("\r\n ");
-			}
-			else
-			{
-				fr = f_write(&s_fil, line, n, &bw);      
-				if (fr != FR_OK || bw != n)             
-				{
-		
+            fr = f_open(&s_fil, "0:/LOG.TXT", FA_WRITE | FA_OPEN_APPEND);
+            if (fr != FR_OK)
+            {
+                uart_puts("FATFS write: FAILED (open) fr=");
+                uart_put_u32((uint32_t)fr);
+                uart_puts("\r\n");
+            }
+            else
+            {
+                fr = f_write(&s_fil, line, n, &bw);
+                if (fr != FR_OK || bw != n)
+                {
                     uart_puts("FATFS write: FAILED  fr=");
                     uart_put_u32((uint32_t)fr);
                     uart_puts("  wrote=");
                     uart_put_u32((uint32_t)bw);
-                    uart_puts("\r\n ");
-				}
-				f_close(&s_fil);                            
-			}
-		}
+                    uart_puts("\r\n");
+                }
+                f_close(&s_fil);
+            }
+        }
 
-		/* 调试：日志文件当前大小。追加 → 每轮变大；覆盖 → 一直不变。（验完可删） */
-		/* 面板刷新：每 10 轮一次（一次约 0.3 秒，别每轮刷） */
-		if ((g_cycle % 10u) == 0u)
-		{
-			ui_refresh(g_cycle, ili9341_error_count(), 1);
-		}
-		uart_puts("LOG size = ");
-		uart_put_u32(file_size_of("0:/LOG.TXT"));
-		uart_puts(" B\r\n");
-	}
+        uart_puts("LOG size = ");
+        uart_put_u32(file_size_of("0:/LOG.TXT"));
+        uart_puts(" B\r\n");
+    }
+
+    /* 面板刷新：周期最长，一次几十毫秒，别做太勤 */
+    if ((now - t_ui) >= TICK_UI_MS)
+    {
+        t_ui = now;
+        ui_refresh(g_cycle, ili9341_error_count(), 1u);
+    }
 
   }
   /* USER CODE END 3 */

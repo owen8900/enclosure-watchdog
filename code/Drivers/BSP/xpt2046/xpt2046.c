@@ -328,6 +328,28 @@ uint8_t xpt2046_read_screen(uint16_t *px, uint16_t *py)
     return 1;
 }
 
+/* 原始值 -> 像素。定义在下面的验收段里，这里先声明（对外接口要用）。 */
+static void xpt_raw_to_px(uint16_t rx, uint16_t ry, uint16_t *px, uint16_t *py);
+
+/* 单次读并映射成像素坐标：1 = 有效（原始值落在窗口内）。
+ * 跟 xpt2046_read_screen() 的区别是**不做两次一致校验** —— 拖动画线时两次读数
+ * 必然不一致（手指在动），用那个接口会一路丢点，线画不出来。代价是噪声点不滤。
+ * 用法分清楚：点按/要稳（判定"按下了"）用 xpt2046_read_screen()，
+ * 跟手/要连续（画线、拖动滑块）用这个。 */
+uint8_t xpt2046_read_screen_fast(uint16_t *px, uint16_t *py)
+{
+    uint16_t rx, ry;
+
+    xpt2046_scan(&rx, &ry);
+    if (xpt_in_window(rx, ry) == 0)
+    {
+        return 0;
+    }
+
+    xpt_raw_to_px(rx, ry, px, py);
+    return 1;
+}
+
 /* ---- 日志（本工程不用 printf，省 Flash） ---- */
 
 static void (*s_log)(const char *msg) = 0;
