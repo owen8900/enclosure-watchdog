@@ -219,6 +219,119 @@ void ili9341_draw_pixel(uint16_t x, uint16_t y, uint16_t color)
     lcd_wr_data(s_tx, 2);
 }
 
+/* ==================== 图形：线 / 矩形 ==================== */
+
+void ili9341_draw_hline(uint16_t x, uint16_t y, uint16_t w, uint16_t color)
+{
+    ili9341_fill_rect(x, y, w, 1, color);           /* 走批量填充，比逐点快得多 */
+}
+
+void ili9341_draw_vline(uint16_t x, uint16_t y, uint16_t h, uint16_t color)
+{
+    ili9341_fill_rect(x, y, 1, h, color);
+}
+
+/* 空心矩形，边框 1 像素 */
+void ili9341_draw_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color)
+{
+    if (w == 0 || h == 0) return;
+
+    ili9341_draw_hline(x, y, w, color);
+    ili9341_draw_hline(x, (uint16_t)(y + h - 1), w, color);
+    ili9341_draw_vline(x, y, h, color);
+    ili9341_draw_vline((uint16_t)(x + w - 1), y, h, color);
+}
+
+/* 任意两点连线：整数 Bresenham。步数有上限，不会死循环 */
+void ili9341_draw_line(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, uint16_t color)
+{
+    int32_t dx = (int32_t)x1 - (int32_t)x0;
+    int32_t dy = (int32_t)y1 - (int32_t)y0;
+    int32_t ax = (dx >= 0) ? dx : -dx;
+    int32_t ay = (dy >= 0) ? dy : -dy;
+    int32_t sx = (dx >= 0) ? 1 : -1;
+    int32_t sy = (dy >= 0) ? 1 : -1;
+    int32_t err = ax - ay;
+    int32_t x = (int32_t)x0;
+    int32_t y = (int32_t)y0;
+    int32_t guard = ax + ay + 2;
+
+    while (guard-- > 0)
+    {
+        ili9341_draw_pixel((uint16_t)x, (uint16_t)y, color);
+        if (x == (int32_t)x1 && y == (int32_t)y1) break;
+
+        if (2 * err > -ay) { err -= ay; x += sx; }
+        if (2 * err <  ax) { err += ax; y += sy; }
+    }
+}
+
+/* ==================== 文字（8x16 点阵） ==================== */
+
+/* 画一个字符。scale=1 原尺寸 8x16，2 就 16x32。宽高越界或一行放不下就整体不画。
+ * 逐行发送：每行的像素先在 s_tx 里按 scale 横向铺开，再纵向重复 scale 遍。 */
+void ili9341_draw_char(uint16_t x, uint16_t y, char ch, uint16_t fg, uint16_t bg, uint8_t scale)
+{
+    const uint8_t *glyph;
+    uint16_t w, h, cx, cy, i;
+    uint8_t  bits;
+
+    if (scale == 0) scale = 1;
+    if (scale > 4)  scale = 4;
+    if (ch < LCD_FONT_FIRST || ch > LCD_FONT_LAST) ch = '?';
+
+    glyph = lcd_font_asc_1608[ch - LCD_FONT_FIRST];
+    w = (uint16_t)(LCD_FONT_W * scale);
+    h = (uint16_t)(LCD_FONT_H * scale);
+
+    if ((uint32_t)x + w > ILI9341_WIDTH)  return;
+    if ((uint32_t)y + h > ILI9341_HEIGHT) return;
+    if ((uint32_t)w * 2u > LCD_TX_CHUNK)  return;        /* 一行装不进发送缓冲，不画 */
+
+    ili9341_set_window(x, y, (uint16_t)(x + w - 1), (uint16_t)(y + h - 1));
+
+    for (cy = 0; cy < LCD_FONT_H; cy++)
+    {
+        uint16_t rep;
+
+        bits = glyph[cy];
+        i = 0;
+        for (cx = 0; cx < LCD_FONT_W; cx++)
+        {
+            uint16_t col = (bits & (uint16_t)(0x80u >> cx)) ? fg : bg;
+            uint16_t k;
+
+            for (k = 0; k < scale; k++)
+            {
+                s_tx[i]     = (uint8_t)(col >> 8);
+                s_tx[i + 1] = (uint8_t)(col & 0xFF);
+                i = (uint16_t)(i + 2);
+            }
+        }
+        for (rep = 0; rep < scale; rep++)                /* 纵向放大：同一行发 scale 遍 */
+        {
+            lcd_wr_data(s_tx, i);
+        }
+    }
+}
+
+/* 画一串字符，画到屏幕右边就停（不会绕行） */
+void ili9341_draw_string(uint16_t x, uint16_t y, const char *s, uint16_t fg, uint16_t bg, uint8_t scale)
+{
+    uint16_t step;
+
+    if (scale == 0) scale = 1;
+    step = (uint16_t)(LCD_FONT_W * scale);
+
+    while (*s != '\0')
+    {
+        if ((uint32_t)x + step > ILI9341_WIDTH) break;
+        ili9341_draw_char(x, y, *s, fg, bg, scale);
+        x = (uint16_t)(x + step);
+        s++;
+    }
+}
+
 /* ====================== 接线核对（配合万用表） ====================== */
 
 static void (*s_log)(const char *msg) = 0;

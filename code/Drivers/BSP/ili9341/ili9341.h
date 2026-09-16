@@ -14,6 +14,7 @@
 #define __ILI9341_H
 
 #include "main.h"
+#include "lcd_font.h"
 #include <stdint.h>
 
 /* 面板分辨率（竖屏 0° ） */
@@ -41,6 +42,14 @@ void     ili9341_set_window(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
 void     ili9341_fill(uint16_t color);       /* 整屏填充 */
 void     ili9341_fill_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color);
 void     ili9341_draw_pixel(uint16_t x, uint16_t y, uint16_t color);
+void     ili9341_draw_hline(uint16_t x, uint16_t y, uint16_t w, uint16_t color);
+void     ili9341_draw_vline(uint16_t x, uint16_t y, uint16_t h, uint16_t color);
+void     ili9341_draw_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color);
+void     ili9341_draw_line(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, uint16_t color);
+void     ili9341_draw_char(uint16_t x, uint16_t y, char ch,
+                           uint16_t fg, uint16_t bg, uint8_t scale);
+void     ili9341_draw_string(uint16_t x, uint16_t y, const char *s,
+                             uint16_t fg, uint16_t bg, uint8_t scale);
 uint32_t ili9341_error_count(void);          /* SPI 传输失败次数（自检打印用） */
 void     ili9341_error_reset(void);
 void     ili9341_set_log(void (*fn)(const char *msg));   /* 注册日志函数（main.c 传 uart_puts 进来） */

@@ -29,6 +29,7 @@
 /* USER CODE BEGIN Includes */
 #include <string.h>
 #include "ili9341.h"
+#include "lcd_ui.h"
 
 /* USER CODE END Includes */
 
@@ -228,6 +229,38 @@ static void file_dump_head(const char *path, uint32_t max)
     f_close(&s_dbg);
 }
 
+/* 面板数据。数值暂为占位值：SHT30 / INA219 / DS18B20 接好后换成实测转换结果 */
+static lcd_ui_data_t s_ui;
+
+/* 填数据并刷新面板。一次刷新约 0.3 秒，按周期调用，别每轮都刷 */
+static void ui_refresh(uint32_t cycle, uint32_t spi_err, uint8_t sd_ok)
+{
+    char tmp[12];
+    int  n;
+
+    strcpy(s_ui.temp, "25.4");
+    strcpy(s_ui.curr, "0.42");
+    strcpy(s_ui.volt, "12.1");
+
+    s_ui.lvl_temp    = LCD_UI_OK;
+    s_ui.lvl_curr    = LCD_UI_WARN;      /* 故意留一路非正常，便于分辨三个色块 */
+    s_ui.lvl_volt    = LCD_UI_OK;
+    s_ui.alarm_level = LCD_UI_WARN;
+    s_ui.heater_on   = 0;
+    s_ui.log_ok      = 1;
+    s_ui.sd_ok       = sd_ok;
+
+    n = u32_to_str(cycle, tmp);
+    tmp[n] = 0;
+    strcpy(s_ui.cycle, tmp);
+
+    n = u32_to_str(spi_err, tmp);
+    tmp[n] = 0;
+    strcpy(s_ui.spi_err, tmp);
+
+    lcd_ui_update(&s_ui);
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -312,6 +345,10 @@ int main(void)
         ili9341_fill(ILI9341_BLACK);
 
         uart_puts("TFT color  : RED -> GREEN -> BLUE -> BLACK\r\n");
+        /* M5：控制柜面板（数值先用占位值） */
+        lcd_ui_draw_static();
+        ui_refresh(0, ili9341_error_count(), 1);
+        uart_puts("TFT UI     : panel drawn\r\n");
     }
 
     /* M3：SD 卡 + FATFS
@@ -550,6 +587,11 @@ int main(void)
 		}
 
 		/* 调试：日志文件当前大小。追加 → 每轮变大；覆盖 → 一直不变。（验完可删） */
+		/* 面板刷新：每 10 轮一次（一次约 0.3 秒，别每轮刷） */
+		if ((g_cycle % 10u) == 0u)
+		{
+			ui_refresh(g_cycle, ili9341_error_count(), 1);
+		}
 		uart_puts("LOG size = ");
 		uart_put_u32(file_size_of("0:/LOG.TXT"));
 		uart_puts(" B\r\n");

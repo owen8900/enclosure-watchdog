@@ -189,7 +189,7 @@
             <hadIRAM2>1</hadIRAM2>
             <hadIROM2>0</hadIROM2>
             <StupSel>8</StupSel>
-            <useUlib>0</useUlib>
+            <useUlib>1</useUlib>
             <EndSel>0</EndSel>
             <uLtcg>0</uLtcg>
             <nSecure>0</nSecure>
@@ -339,7 +339,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,STM32H750xx</Define>
               <Undefine></Undefine>
-              <IncludePath>../Core/Inc;   ../Drivers/STM32H7xx_HAL_Driver/Inc;   ../Drivers/STM32H7xx_HAL_Driver/Inc/Legacy;   ../Drivers/CMSIS/Device/ST/STM32H7xx/Include;   ../Drivers/CMSIS/Include; ../FATFS/Target; ../FATFS/App; ../Middlewares/Third_Party/FatFs/src;../Drivers/BSP/ili9341</IncludePath>
+              <IncludePath>../Core/Inc;   ../Drivers/STM32H7xx_HAL_Driver/Inc;   ../Drivers/STM32H7xx_HAL_Driver/Inc/Legacy;   ../Drivers/CMSIS/Device/ST/STM32H7xx/Include;   ../Drivers/CMSIS/Include; ../FATFS/Target; ../FATFS/App; ../Middlewares/Third_Party/FatFs/src;../Drivers/BSP/ili9341;../Drivers/BSP/lcd_font../Core/Inc;   ../Drivers/STM32H7xx_HAL_Driver/Inc;   ../Drivers/STM32H7xx_HAL_Driver/Inc/Legacy;   ../Drivers/CMSIS/Device/ST/STM32H7xx/Include;   ../Drivers/CMSIS/Include; ../FATFS/Target; ../FATFS/App; ../Middlewares/Third_Party/FatFs/src;../Drivers/BSP/ili9341;../Drivers/BSP/lcd_font;../Drivers/BSP/lcd_ui</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -1602,6 +1602,38 @@
             </File>
           </Files>
         </Group>
+        <Group>
+          <GroupName>BSP/lcd_font</GroupName>
+          <Files>
+            <File>
+              <FileName>lcd_font.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Drivers\BSP\lcd_font\lcd_font.c</FilePath>
+            </File>
+            <File>
+              <FileName>lcd_font.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Drivers\BSP\lcd_font\lcd_font.h</FilePath>
+            </File>
+          </Files>
+        </Group>
+
+        <Group>
+          <GroupName>BSP/lcd_ui</GroupName>
+          <Files>
+            <File>
+              <FileName>lcd_ui.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Drivers\BSP\lcd_ui\lcd_ui.c</FilePath>
+            </File>
+            <File>
+              <FileName>lcd_ui.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Drivers\BSP\lcd_ui\lcd_ui.h</FilePath>
+            </File>
+          </Files>
+        </Group>
+
         <Group>
           <GroupName>Startup</GroupName>
           <Files>
