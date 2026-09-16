@@ -339,7 +339,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,STM32H750xx</Define>
               <Undefine></Undefine>
-              <IncludePath>../Core/Inc;   ../Drivers/STM32H7xx_HAL_Driver/Inc;   ../Drivers/STM32H7xx_HAL_Driver/Inc/Legacy;   ../Drivers/CMSIS/Device/ST/STM32H7xx/Include;   ../Drivers/CMSIS/Include; ../FATFS/Target; ../FATFS/App; ../Middlewares/Third_Party/FatFs/src;../Drivers/BSP/ili9341;../Drivers/BSP/lcd_font../Core/Inc;   ../Drivers/STM32H7xx_HAL_Driver/Inc;   ../Drivers/STM32H7xx_HAL_Driver/Inc/Legacy;   ../Drivers/CMSIS/Device/ST/STM32H7xx/Include;   ../Drivers/CMSIS/Include; ../FATFS/Target; ../FATFS/App; ../Middlewares/Third_Party/FatFs/src;../Drivers/BSP/ili9341;../Drivers/BSP/lcd_font;../Drivers/BSP/lcd_ui</IncludePath>
+              <IncludePath>../Core/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32H7xx/Include;../Drivers/CMSIS/Include;../FATFS/Target;../FATFS/App;../Middlewares/Third_Party/FatFs/src;../Drivers/BSP/ili9341;../Drivers/BSP/lcd_font;../Drivers/BSP/lcd_ui;../Drivers/BSP/xpt2046</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -1630,6 +1630,22 @@
               <FileName>lcd_ui.h</FileName>
               <FileType>5</FileType>
               <FilePath>..\Drivers\BSP\lcd_ui\lcd_ui.h</FilePath>
+            </File>
+          </Files>
+        </Group>
+
+        <Group>
+          <GroupName>BSP/xpt2046</GroupName>
+          <Files>
+            <File>
+              <FileName>xpt2046.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Drivers\BSP\xpt2046\xpt2046.c</FilePath>
+            </File>
+            <File>
+              <FileName>xpt2046.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Drivers\BSP\xpt2046\xpt2046.h</FilePath>
             </File>
           </Files>
         </Group>

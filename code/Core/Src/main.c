@@ -30,6 +30,7 @@
 #include <string.h>
 #include "ili9341.h"
 #include "lcd_ui.h"
+#include "xpt2046.h"
 
 /* USER CODE END Includes */
 
@@ -43,6 +44,14 @@
 /* 接线核对模式：1 = 上电先跑「逐根线慢速翻转」，配合万用表沿线路核对；平时保持 0。
  * 2026-09-16：屏不亮就是靠它定位到一根线松动，核对完已改回 0。 */
 #define LCD_WIRING_TEST 0
+
+/* 触摸（XPT2046）的两个开关：
+ * XPT_WIRING_TEST    1 = 上电先把 T_CS/T_CLK/T_DIN 逐根慢翻转，配合万用表核对接线；平时 0
+ * XPT_SELFTEST_SECONDS  > 0 = 上电打 N 秒原始值（触笔按住时数值会变），用来验收和标定；
+ *                      正式固件里改回 0 —— 它是阻塞的。
+ * 2026-09-16：首次上板验收时设 20，取完标定值改回 0。 */
+#define XPT_WIRING_TEST        0
+#define XPT_SELFTEST_SECONDS   0
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -349,6 +358,26 @@ int main(void)
         lcd_ui_draw_static();
         ui_refresh(0, ili9341_error_count(), 1);
         uart_puts("TFT UI     : panel drawn\r\n");
+    }
+
+    /* M6：触摸（XPT2046）自检
+     * 上电打 XPT_SELFTEST_SECONDS 秒原始值，串口每 200ms 一行。
+     * 验收判据：触笔按住时 raw X/Y 随位置变化，松开时判为 idle。
+     * 顺带标定：触笔依次点屏幕最左/最右/最上/最下，把那一刻的 X/Y 抄进
+     * xpt2046.c 的 s_cal；松开手那些行就是「没按下」的实测范围。
+     * 标定完把 XPT_SELFTEST_SECONDS 改回 0（它是阻塞的）。 */
+    {
+        xpt2046_set_log(uart_puts);
+        xpt2046_init();
+
+#if XPT_WIRING_TEST
+        uart_puts("TOUCH XPT  : wiring check\r\n");
+        xpt2046_wiring_test();
+#endif
+
+#if XPT_SELFTEST_SECONDS > 0
+        xpt2046_selftest(XPT_SELFTEST_SECONDS);
+#endif
     }
 
     /* M3：SD 卡 + FATFS

@@ -70,6 +70,14 @@ void Error_Handler(void);
 #define TFT_RST_GPIO_Port GPIOE
 #define TFT_DC_Pin GPIO_PIN_1
 #define TFT_DC_GPIO_Port GPIOE
+#define TOUCH_CS_Pin GPIO_PIN_3
+#define TOUCH_CS_GPIO_Port GPIOC
+#define TOUCH_CLK_Pin GPIO_PIN_14
+#define TOUCH_CLK_GPIO_Port GPIOB
+#define TOUCH_DIN_Pin GPIO_PIN_3
+#define TOUCH_DIN_GPIO_Port GPIOA
+#define TOUCH_DO_Pin GPIO_PIN_0
+#define TOUCH_DO_GPIO_Port GPIOC
 /* USER CODE BEGIN Private defines */
 
 /* USER CODE END Private defines */
