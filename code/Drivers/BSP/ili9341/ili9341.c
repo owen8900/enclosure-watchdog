@@ -98,11 +98,10 @@ uint8_t ili9341_init(void)
     static const uint8_t p_c1[] = { 0x00 };                                         /* Power control 2 (BT) */
     static const uint8_t p_c5[] = { 0x30, 0x30 };                                   /* VCOM control 1 */
     static const uint8_t p_c7[] = { 0xB7 };                                         /* VCOM control 2 */
-    /* MADCTL：BGR + MX。MX 是「列地址反序」，不开它整屏左右镜像。
-     * 厂商例程给的是 0x08（只开 BGR），那是照他们手上那块玻璃的装配方向写的；
-     * 我们这块实测打出的是镜像字（"WARNING" 变成照镜子的样子），
-     * 把 MX 位补上才是正的。上下方向是对的（MY 保持 0），别一起改。 */
-    static const uint8_t p_36[] = { 0x48 };                                         /* MADCTL：BGR + MX，竖屏 0° */
+    static const uint8_t p_36[] = { 0x08 };                                         /* MADCTL：只开 BGR，竖屏 0°。
+                                                                                     * 厂商给的就是这个值，实测这块屏也是它对：
+                                                                                     * 0x08 版面正、上下正。别再加 MX/MY 去"修字"——
+                                                                                     * 字镜像的根因在字模位序，不在 MADCTL。 */
     static const uint8_t p_3a[] = { 0x55 };                                         /* 像素格式：16bit RGB565 */
     static const uint8_t p_b1[] = { 0x00, 0x1A };                                   /* Frame rate control */
     static const uint8_t p_b6[] = { 0x0A, 0xA2 };                                   /* Display function control */
@@ -168,9 +167,9 @@ uint8_t ili9341_init(void)
  * 注意四种都不动 MV 位，所以一直是竖屏 240x320。 */
 static const uint8_t s_orient[4] = { 0x08, 0x48, 0xC8, 0x88 };
 
-/* 当前方向在 s_orient[] 里的下标。开机值 1 = 0x48，
+/* 当前方向在 s_orient[] 里的下标。开机值 0 = 0x08（实测这块屏要这个），
  * 与 ili9341_init() 里 p_36 写的一致，别单独改一处。 */
-static uint8_t s_orient_idx = 1u;
+static uint8_t s_orient_idx = 0u;
 
 static void ili9341_apply_orient(void)
 {
@@ -345,7 +344,13 @@ void ili9341_draw_char(uint16_t x, uint16_t y, char ch, uint16_t fg, uint16_t bg
         i = 0;
         for (cx = 0; cx < LCD_FONT_W; cx++)
         {
-            uint16_t col = (bits & (uint16_t)(0x80u >> cx)) ? fg : bg;
+            /* 位序：**低位对应行内最左像素**（0x01<<cx）。
+             * 本项目字库来自厂商 FONT.H 的 asc2_1608，那份字库就是低位在最左。
+             * 2026-09-16 踩过：这里原来写的是 0x80>>cx（高位在最左），
+             * 结果每个字母被左右镜像（"L" 的脚朝左、"C" 开口朝左），
+             * 而版面是正常的 —— 当时误以为是屏的方向问题，去改 MADCTL，
+             * 字母是正了但整个版面被翻掉。改回本行才两样都对。 */
+            uint16_t col = (bits & (uint16_t)(0x01u << cx)) ? fg : bg;
             uint16_t k;
 
             for (k = 0; k < scale; k++)
