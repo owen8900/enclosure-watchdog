@@ -335,18 +335,22 @@ static void xpt_raw_to_px(uint16_t rx, uint16_t ry, uint16_t *px, uint16_t *py);
  * 跟 xpt2046_read_screen() 的区别是**不做两次一致校验** —— 拖动画线时两次读数
  * 必然不一致（手指在动），用那个接口会一路丢点，线画不出来。代价是噪声点不滤。
  * 用法分清楚：点按/要稳（判定"按下了"）用 xpt2046_read_screen()，
- * 跟手/要连续（画线、拖动滑块）用这个。 */
-uint8_t xpt2046_read_screen_fast(uint16_t *px, uint16_t *py)
+ * 跟手/要连续（画线、拖动滑块）用这个。
+ * rx / ry 非空时顺便把原始值带出去（显示与排查用）。 */
+uint8_t xpt2046_read_screen_fast(uint16_t *px, uint16_t *py, uint16_t *rx, uint16_t *ry)
 {
-    uint16_t rx, ry;
+    uint16_t x, y;
 
-    xpt2046_scan(&rx, &ry);
-    if (xpt_in_window(rx, ry) == 0)
+    xpt2046_scan(&x, &y);
+    if (xpt_in_window(x, y) == 0)
     {
         return 0;
     }
 
-    xpt_raw_to_px(rx, ry, px, py);
+    if (rx != 0) { *rx = x; }
+    if (ry != 0) { *ry = y; }
+
+    xpt_raw_to_px(x, y, px, py);
     return 1;
 }
 

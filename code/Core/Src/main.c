@@ -338,6 +338,24 @@ static void touch_status(uint16_t px, uint16_t py)
     ili9341_draw_string(4u, TOUCH_STATUS_Y, buf, ILI9341_WHITE, ILI9341_BLACK, 1u);
 }
 
+/* 松手时往串口打一行：屏幕上的坐标 + 对应原始值 + 累计次数。
+ * 有了它，排查"显示跟手指不一致"时不用拍照 —— 直接发日志文件即可，
+ * 从 raw 和 px 的对应关系就能判断是读数反了还是画的位置不对。 */
+static void touch_log_line(uint16_t px, uint16_t py, uint16_t rx, uint16_t ry)
+{
+    uart_puts("TOUCH px=");
+    uart_put_u32(px);
+    uart_puts(" py=");
+    uart_put_u32(py);
+    uart_puts("  raw=");
+    uart_put_u32(rx);
+    uart_puts(",");
+    uart_put_u32(ry);
+    uart_puts("  n=");
+    uart_put_u32(g_touch_n);
+    uart_puts("\r\n");
+}
+
 /* 触摸轮询（每 TICK_TOUCH_MS 调一次）。
  * 按下就画十字、跟着手指走；松手把最终坐标记到状态行；
  * 点标题栏那一条（y < 32）＝ 擦掉重画（面板重画一遍，当清屏用）。
@@ -348,11 +366,14 @@ static void touch_poll(void)
     static uint8_t  down_before = 0u;
     static uint16_t last_x      = 0u;
     static uint16_t last_y      = 0u;
+    static uint16_t last_rx     = 0u;
+    static uint16_t last_ry     = 0u;
     uint16_t px = 0u, py = 0u;
+    uint16_t rx = 0u, ry = 0u;
     uint16_t dx, dy;
     uint8_t  down;
 
-    down = xpt2046_read_screen_fast(&px, &py);
+    down = xpt2046_read_screen_fast(&px, &py, &rx, &ry);
 
     if (down == 0u)
     {
@@ -360,6 +381,7 @@ static void touch_poll(void)
         {
             down_before = 0u;
             touch_status(last_x, last_y);
+            touch_log_line(last_x, last_y, last_rx, last_ry);
         }
         return;
     }
@@ -386,8 +408,10 @@ static void touch_poll(void)
         }
     }
 
-    last_x = px;
-    last_y = py;
+    last_x  = px;
+    last_y  = py;
+    last_rx = rx;
+    last_ry = ry;
     touch_marker(px, py);
 }
 
@@ -483,6 +507,24 @@ int main(void)
     {
         xpt2046_set_log(uart_puts);
         xpt2046_init();
+
+        /* 开机把实际生效的标定值打出来：万一烧的是旧固件、或者标定没生效，
+         * 看这一行立刻就知道了（曾经在这类事上浪费过时间）。 */
+        {
+            const xpt2046_cal_t *c = xpt2046_get_cal();
+
+            uart_puts("XPT cal    : x ");
+            uart_put_u32(c->x_raw_at_0);
+            uart_puts("..");
+            uart_put_u32(c->x_raw_at_max);
+            uart_puts("  y ");
+            uart_put_u32(c->y_raw_at_0);
+            uart_puts("..");
+            uart_put_u32(c->y_raw_at_max);
+            uart_puts("  swap=");
+            uart_put_u32(c->swap_xy);
+            uart_puts("\r\n");
+        }
 
 #if XPT_WIRING_TEST
         uart_puts("TOUCH XPT  : wiring check\r\n");

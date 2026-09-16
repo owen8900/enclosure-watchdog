@@ -54,7 +54,7 @@ void                 xpt2046_init(void);
 void                 xpt2046_scan(uint16_t *x, uint16_t *y);
 uint8_t              xpt2046_read_raw(uint16_t *x, uint16_t *y);
 uint8_t              xpt2046_read_screen(uint16_t *px, uint16_t *py);
-uint8_t              xpt2046_read_screen_fast(uint16_t *px, uint16_t *py);
+uint8_t              xpt2046_read_screen_fast(uint16_t *px, uint16_t *py, uint16_t *rx, uint16_t *ry);
 void                 xpt2046_set_cal(const xpt2046_cal_t *cal);
 const xpt2046_cal_t *xpt2046_get_cal(void);
 void                 xpt2046_set_log(void (*fn)(const char *msg));
