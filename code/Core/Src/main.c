@@ -358,7 +358,8 @@ static void touch_log_line(uint16_t px, uint16_t py, uint16_t rx, uint16_t ry)
 
 /* 触摸轮询（每 TICK_TOUCH_MS 调一次）。
  * 按下就画十字、跟着手指走；松手把最终坐标记到状态行；
- * 点标题栏那一条（y < 32）＝ 擦掉重画（面板重画一遍，当清屏用）。
+ * 点标题栏那一条（y < 32）＝ 换一种显示方向并重画（调试用：四种方向循环，
+ * 挑出读字正的那个，再把 ili9341.c 的 s_orient_idx 开机值定死）。
  * 用途有两个：一是演示，二是**验收时间片改造** —— 十字跟手就说明触摸扫描
  * 没被 LED/写卡/刷屏那些动作的延时卡住。 */
 static void touch_poll(void)
@@ -390,8 +391,16 @@ static void touch_poll(void)
     {
         down_before = 1u;
         g_touch_n++;
-        if (py < 32u)                           /* 标题栏：清屏 */
+        if (py < 32u)                           /* 标题栏：换一种显示方向并重画 */
         {
+            uint8_t idx = ili9341_orient_next();
+
+            uart_puts("LCD orient : idx=");
+            uart_put_u32((uint32_t)idx);
+            uart_puts("  madctl=0x");
+            uart_put_hex32((uint32_t)ili9341_orient_madctl());
+            uart_puts("   (0=0x08 1=0x48 2=0xC8 3=0x88)\r\n");
+
             lcd_ui_draw_static();
             ui_refresh(g_cycle, ili9341_error_count(), 1u);
             g_touch_n = 0u;
@@ -525,6 +534,13 @@ int main(void)
             uart_put_u32(c->swap_xy);
             uart_puts("\r\n");
         }
+
+        /* 当前显示方向（点标题栏可以循环切换，见 touch_poll） */
+        uart_puts("LCD orient : idx=");
+        uart_put_u32((uint32_t)ili9341_orient_get());
+        uart_puts("  madctl=0x");
+        uart_put_hex32((uint32_t)ili9341_orient_madctl());
+        uart_puts("   (0=0x08 1=0x48 2=0xC8 3=0x88)\r\n");
 
 #if XPT_WIRING_TEST
         uart_puts("TOUCH XPT  : wiring check\r\n");

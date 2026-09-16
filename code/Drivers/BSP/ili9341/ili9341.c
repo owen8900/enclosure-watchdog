@@ -156,6 +156,49 @@ uint8_t ili9341_init(void)
     return (uint8_t)(s_err - err0);
 }
 
+/* ============================ 显示方向 ============================ */
+
+/* MADCTL(0x36) 里 BGR / MX / MY 三位的四种组合：
+ *   0x08 = BGR            原方向
+ *   0x48 = BGR + MX       左右镜像
+ *   0xC8 = BGR + MX + MY  180°（上下左右都翻）
+ *   0x88 = BGR + MY       上下镜像
+ * 这块屏的玻璃装配方向跟厂商例程不一样，光看手册定不下来，得实测挑一个。
+ * 挑法见 main.c：点标题栏循环切换，哪个方向读字正就用哪个。
+ * 注意四种都不动 MV 位，所以一直是竖屏 240x320。 */
+static const uint8_t s_orient[4] = { 0x08, 0x48, 0xC8, 0x88 };
+
+/* 当前方向在 s_orient[] 里的下标。开机值 1 = 0x48，
+ * 与 ili9341_init() 里 p_36 写的一致，别单独改一处。 */
+static uint8_t s_orient_idx = 1u;
+
+static void ili9341_apply_orient(void)
+{
+    uint8_t v = s_orient[s_orient_idx];
+
+    lcd_cmd_data(0x36, &v, 1);
+
+    /* 换方向后把整屏窗口重设一遍，免得残留上一个方向留下的窗口范围 */
+    {
+        static const uint8_t x[] = { 0x00, 0x00, 0x00, 0xEF };
+        static const uint8_t y[] = { 0x00, 0x00, 0x01, 0x3F };
+        lcd_cmd_data(0x2A, x, sizeof x);
+        lcd_cmd_data(0x2B, y, sizeof y);
+    }
+}
+
+/* 切到下一种方向，返回新下标 */
+uint8_t ili9341_orient_next(void)
+{
+    s_orient_idx = (uint8_t)((s_orient_idx + 1u) & 3u);
+    ili9341_apply_orient();
+    return s_orient_idx;
+}
+
+uint8_t  ili9341_orient_get(void)    { return s_orient_idx; }
+
+uint16_t ili9341_orient_madctl(void) { return (uint16_t)s_orient[s_orient_idx]; }
+
 /* ============================ 绘图 ============================ */
 
 void ili9341_set_window(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)

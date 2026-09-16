@@ -38,7 +38,13 @@
 #define ILI9341_BL_OFF()  do { } while (0)
 
 uint8_t  ili9341_init(void);                 /* 0 = 成功；非 0 = 初始化期间的错误计数 */
-void     ili9341_set_window(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
+void ili9341_set_window(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
+
+/* 显示方向：循环切换用的（0..3，见 ili9341.c 的 s_orient[]）。
+ * 这块屏的玻璃装配方向跟厂商例程不同，用这个实测挑一个正确的。 */
+uint8_t  ili9341_orient_next(void);
+uint8_t  ili9341_orient_get(void);
+uint16_t ili9341_orient_madctl(void);
 void     ili9341_fill(uint16_t color);       /* 整屏填充 */
 void     ili9341_fill_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color);
 void     ili9341_draw_pixel(uint16_t x, uint16_t y, uint16_t color);
