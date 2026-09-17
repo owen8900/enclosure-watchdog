@@ -1663,7 +1663,6 @@
             </File>
           </Files>
         </Group>
-
         <Group>
           <GroupName>Startup</GroupName>
           <Files>
