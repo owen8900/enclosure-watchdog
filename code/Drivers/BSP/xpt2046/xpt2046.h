@@ -4,6 +4,7 @@
   * 功能    : 2.8 寸 ILI9341 SPI 模块上的电阻触摸（XPT2046）驱动接口
   * 硬件    : MiniPro STM32H750 V1.5，4 条独立 GPIO 位翻转，不占硬件 SPI
   *            T_CS=PC3  T_CLK=PB14  T_DIN=PA3  T_DO=PC0
+  *            时钟脚可用 XPT_CLK_ON_PC2 切到 PC2（把 PB14 让给 SPI2 的 MISO）
   * 说明    : 时序、命令字取自厂商软件 SPI 例程
   *            Demo_STM32F103RCT6_Software_SPI/HARDWARE/TOUCH/touch.c
   *            SCLK 上限约 2MHz，与 ILI9341 的 6MHz 不同，所以不共用 SPI2
@@ -22,6 +23,12 @@
 /* 屏幕分辨率，必须与 ili9341.h 一致（不 include 是为了不依赖显示驱动） */
 #define XPT2046_SCREEN_W    240
 #define XPT2046_SCREEN_H    320
+
+/* 触摸时钟脚。默认 PB14（屏只写不读、SPI2 的 MISO 用不上，这根线让给了触摸）。
+ * 要让出 PB14 给 W5500 当 SPI2_MISO 时：把屏那头 T_CLK 的线改插到板子 PC2，
+ * 再把这里改成 1。引脚对调在 xpt2046_init() 里做，不动 CubeMX 生成的文件。
+ * ⚠️ 顺序不能反：先挪线、再改宏，否则触摸不响应。 */
+#define XPT_CLK_ON_PC2      0
 
 /* 「按下」判定的原始值窗口（没接 T_IRQ，只能靠值判断）：
  * 空闲时 Y 顶在 4095，按下时 Y 最大约 3820，100/4000 正好把两者分开。 */

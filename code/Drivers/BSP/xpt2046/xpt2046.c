@@ -9,6 +9,16 @@
 
 #include "xpt2046.h"
 
+#if XPT_CLK_ON_PC2
+  #define XPT_CLK_PORT   GPIOC
+  #define XPT_CLK_PIN    GPIO_PIN_2
+  #define XPT_CLK_NAME   "PC2"
+#else
+  #define XPT_CLK_PORT   TOUCH_CLK_GPIO_Port
+  #define XPT_CLK_PIN    TOUCH_CLK_Pin
+  #define XPT_CLK_NAME   "PB14"
+#endif
+
 /* XPT2046 控制字 = 起始位 1 + 通道 3 位 + 12bit 模式(0) + 差分(0) + 转换完断电(00) */
 #define XPT_CMD_X        0xD0       /* 通道 101 = X */
 #define XPT_CMD_Y        0x90       /* 通道 001 = Y */
@@ -26,8 +36,8 @@
 
 #define TOUCH_CS_H    HAL_GPIO_WritePin(TOUCH_CS_GPIO_Port,  TOUCH_CS_Pin,  GPIO_PIN_SET)
 #define TOUCH_CS_L    HAL_GPIO_WritePin(TOUCH_CS_GPIO_Port,  TOUCH_CS_Pin,  GPIO_PIN_RESET)
-#define TOUCH_CLK_H   HAL_GPIO_WritePin(TOUCH_CLK_GPIO_Port, TOUCH_CLK_Pin, GPIO_PIN_SET)
-#define TOUCH_CLK_L   HAL_GPIO_WritePin(TOUCH_CLK_GPIO_Port, TOUCH_CLK_Pin, GPIO_PIN_RESET)
+#define TOUCH_CLK_H   HAL_GPIO_WritePin(XPT_CLK_PORT, XPT_CLK_PIN, GPIO_PIN_SET)
+#define TOUCH_CLK_L   HAL_GPIO_WritePin(XPT_CLK_PORT, XPT_CLK_PIN, GPIO_PIN_RESET)
 #define TOUCH_DIN_H   HAL_GPIO_WritePin(TOUCH_DIN_GPIO_Port, TOUCH_DIN_Pin, GPIO_PIN_SET)
 #define TOUCH_DIN_L   HAL_GPIO_WritePin(TOUCH_DIN_GPIO_Port, TOUCH_DIN_Pin, GPIO_PIN_RESET)
 #define TOUCH_DO_IN   (HAL_GPIO_ReadPin(TOUCH_DO_GPIO_Port, TOUCH_DO_Pin) == GPIO_PIN_SET)
@@ -214,7 +224,25 @@ const xpt2046_cal_t *xpt2046_get_cal(void)
 
 void xpt2046_init(void)
 {
-    /* 引脚模式由 CubeMX 配好，这里只把空闲电平摆正 */
+#if XPT_CLK_ON_PC2
+    /* 对调：PB14 还给 SPI2 当 MISO（W5500 要读数据），触摸时钟改用 PC2。
+     * 运行时重映射，不碰 CubeMX 生成的文件，重新 GENERATE CODE 也冲不掉。 */
+    GPIO_InitTypeDef g = {0};
+
+    g.Pin = GPIO_PIN_14;
+    g.Mode = GPIO_MODE_AF_PP;
+    g.Pull = GPIO_NOPULL;
+    g.Speed = GPIO_SPEED_FREQ_LOW;
+    g.Alternate = GPIO_AF5_SPI2;
+    HAL_GPIO_Init(GPIOB, &g);
+
+    g.Pin = XPT_CLK_PIN;
+    g.Mode = GPIO_MODE_OUTPUT_PP;
+    g.Alternate = 0;
+    HAL_GPIO_Init(XPT_CLK_PORT, &g);
+#endif
+
+    /* 空闲电平摆正 */
     TOUCH_CS_H;
     TOUCH_CLK_L;
     TOUCH_DIN_L;
@@ -896,8 +924,10 @@ void xpt2046_wiring_test(void)
     xpt_log("Step 1/3: T_CS  (PC3)  1Hz for 8s -> 0V <-> 3.3V\r\n");
     xpt_toggle(TOUCH_CS_GPIO_Port, TOUCH_CS_Pin, 8, GPIO_PIN_SET);
 
-    xpt_log("Step 2/3: T_CLK (PB14) 1Hz for 8s -> 0V <-> 3.3V\r\n");
-    xpt_toggle(TOUCH_CLK_GPIO_Port, TOUCH_CLK_Pin, 8, GPIO_PIN_RESET);
+    xpt_log("Step 2/3: T_CLK (");
+    xpt_log(XPT_CLK_NAME);
+    xpt_log(") 1Hz for 8s -> 0V <-> 3.3V\r\n");
+    xpt_toggle(XPT_CLK_PORT, XPT_CLK_PIN, 8, GPIO_PIN_RESET);
 
     xpt_log("Step 3/3: T_DIN (PA3)  1Hz for 8s -> 0V <-> 3.3V\r\n");
     xpt_toggle(TOUCH_DIN_GPIO_Port, TOUCH_DIN_Pin, 8, GPIO_PIN_RESET);
