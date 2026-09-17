@@ -607,6 +607,33 @@ int main(void)
             uart_puts("  spi err total=");
             uart_put_u32(w5500_error_count());
             uart_puts("\r\n");
+            {
+                uint8_t p[8];
+                uint8_t i, any = 0u, all = 0xFFu;
+
+                w5500_bus_probe(p, 8u);
+                for (i = 0u; i < 8u; i++)
+                {
+                    any |= p[i];
+                    all &= p[i];
+                }
+                uart_puts("             MISO probe: OR=0x");
+                uart_put_hex32((uint32_t)any);
+                uart_puts(" AND=0x");
+                uart_put_hex32((uint32_t)all);
+                if (any == 0u)
+                {
+                    uart_puts("  MISO stuck LOW  (no wire / no power / pulled low)\r\n");
+                }
+                else if (all == 0xFFu)
+                {
+                    uart_puts("  MISO stuck HIGH (no wire / floating)\r\n");
+                }
+                else
+                {
+                    uart_puts("  MISO toggling   (chip alive: look elsewhere)\r\n");
+                }
+            }
             uart_puts("             check: SCS=PA8 SCLK=PB13 MOSI=PB15 MISO=PB14 5V GND\r\n");
         }
     }

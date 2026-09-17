@@ -44,6 +44,7 @@ uint8_t  w5500_link_up(void);
 uint32_t w5500_error_count(void);
 
 uint8_t  w5500_read(uint16_t addr, uint8_t bsb, uint8_t *buf, uint16_t len);
+void     w5500_bus_probe(uint8_t *out, uint8_t n);   /* 诊断：看 MISO 有没有反应 */
 uint8_t  w5500_write(uint16_t addr, uint8_t bsb, const uint8_t *buf, uint16_t len);
 uint8_t  w5500_read8(uint16_t addr, uint8_t bsb);
 void     w5500_write8(uint16_t addr, uint8_t bsb, uint8_t val);

@@ -14,6 +14,7 @@
 
 static uint32_t s_err;
 static uint8_t  s_ver;
+static uint8_t  s_tx[8];      /* 探针用：发 0xFF 看 MISO */
 
 /* 片选，低有效。与屏共用 SPI2 时，同时只有被选中的那个设备会理会总线 */
 static void w_cs(uint8_t assert)
@@ -86,6 +87,29 @@ uint8_t w5500_read8(uint16_t addr, uint8_t bsb)
 void w5500_write8(uint16_t addr, uint8_t bsb, uint8_t val)
 {
     (void)w5500_write(addr, bsb, &val, 1u);
+}
+
+/* 总线探针：CS 拉低后连发 8 个 0xFF（当作读操作），把 MISO 上看到的字节带出去。
+ * 用来区分"完全没通信"的几种原因：恒低 = 没接/没电；恒高 = 浮空；有跳变 = 芯片活着。 */
+void w5500_bus_probe(uint8_t *out, uint8_t n)
+{
+    uint8_t i;
+
+    if (n > sizeof(s_tx))
+    {
+        n = (uint8_t)sizeof(s_tx);
+    }
+    for (i = 0; i < n; i++)
+    {
+        s_tx[i] = 0xFFu;
+    }
+
+    w_cs(1u);
+    if (HAL_SPI_TransmitReceive(&hspi2, s_tx, out, n, W5500_SPI_TIMEOUT) != HAL_OK)
+    {
+        s_err++;
+    }
+    w_cs(0u);
 }
 
 uint8_t w5500_version(void)
