@@ -169,6 +169,109 @@ uint32_t w5500_error_count(void)
     return s_err;
 }
 
+/* ---------------------------------------------------------------
+ * 位翻转慢速 SPI（只用于诊断）
+ * 绕开 SPI2 外设，用纯 GPIO 按 W5500 的时序读 VERSIONR：
+ * 模式 0，MOSI 上升沿被从机采样，MISO 上升沿输出。
+ * 读 MISO 时开内部上拉 —— 芯片不驱动时读成 1（跟"被拉低"分开）。
+ * --------------------------------------------------------------- */
+static void bb_delay(void)
+{
+    volatile uint32_t i;
+
+    for (i = 0u; i < 700u; i++)     /* 半周期约几微秒；W5500 不挑速度 */
+    {
+    }
+}
+
+static void bb_pin_mode(uint8_t data_mode)
+{
+    GPIO_InitTypeDef g = {0};
+
+    if (data_mode != 0u)
+    {
+        /* SCK / MOSI 输出 */
+        g.Pin = GPIO_PIN_13 | GPIO_PIN_15;
+        g.Mode = GPIO_MODE_OUTPUT_PP;
+        g.Pull = GPIO_NOPULL;
+        g.Speed = GPIO_SPEED_FREQ_LOW;
+        HAL_GPIO_Init(GPIOB, &g);
+
+        /* MISO 输入 + 上拉 */
+        g.Pin = GPIO_PIN_14;
+        g.Mode = GPIO_MODE_INPUT;
+        g.Pull = GPIO_PULLUP;
+        HAL_GPIO_Init(GPIOB, &g);
+    }
+    else
+    {
+        /* 还原成 SPI2 的 AF5，别把总线留在位翻转状态 */
+        g.Pin = GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15;
+        g.Mode = GPIO_MODE_AF_PP;
+        g.Pull = GPIO_NOPULL;
+        g.Speed = GPIO_SPEED_FREQ_LOW;
+        g.Alternate = GPIO_AF5_SPI2;
+        HAL_GPIO_Init(GPIOB, &g);
+    }
+}
+
+static void bb_out_bit(uint8_t bit)
+{
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15, (bit != 0u) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    bb_delay();
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13, GPIO_PIN_SET);        /* 上升沿：从机采样 */
+    bb_delay();
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13, GPIO_PIN_RESET);
+    bb_delay();
+}
+
+static uint8_t bb_in_bit(void)
+{
+    uint8_t bit;
+
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13, GPIO_PIN_SET);        /* 上升沿：从机送数据 */
+    bb_delay();
+    bit = (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_14) == GPIO_PIN_SET) ? 1u : 0u;
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13, GPIO_PIN_RESET);
+    bb_delay();
+
+    return bit;
+}
+
+static void bb_out_byte(uint8_t val)
+{
+    uint8_t i;
+
+    for (i = 0u; i < 8u; i++)
+    {
+        bb_out_bit((uint8_t)((val >> (7u - i)) & 1u));
+    }
+}
+
+uint8_t w5500_bitbang_version(void)
+{
+    uint8_t v = 0u;
+    uint8_t i;
+
+    bb_pin_mode(1u);                        /* 切到位翻转用的方向 */
+    HAL_GPIO_WritePin(W5500_CS_PORT, W5500_CS_PIN, GPIO_PIN_RESET);
+    bb_delay();
+
+    bb_out_byte(0x00u);                     /* 地址高字节 */
+    bb_out_byte(0x39u);                     /* 地址低字节 = VERSIONR */
+    bb_out_byte(0x80u);                     /* RWB=1 读 | BSB=0 common */
+
+    for (i = 0u; i < 8u; i++)
+    {
+        v = (uint8_t)((v << 1) | bb_in_bit());
+    }
+
+    HAL_GPIO_WritePin(W5500_CS_PORT, W5500_CS_PIN, GPIO_PIN_SET);
+    bb_pin_mode(0u);                        /* 还给 SPI2 */
+
+    return v;
+}
+
 uint8_t w5500_init(void)
 {
     GPIO_InitTypeDef g = {0};

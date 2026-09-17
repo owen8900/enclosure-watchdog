@@ -641,6 +641,12 @@ int main(void)
                 uart_puts((idle == 0u)
                           ? "  (settled 0: something holds it low)\r\n"
                           : "  (settled 1: nobody drives it = floating or Hi-Z)\r\n");
+
+                /* 位翻转慢速 SPI 再读一次：绕过 SPI2 外设，
+                 * 把"模块不搭话"和"SPI2 配置有问题"分开 */
+                uart_puts("             VERSIONR via bitbang SPI = 0x");
+                uart_put_hex32((uint32_t)w5500_bitbang_version());
+                uart_puts("  (0x04 = module alive, check SPI2 side)\r\n");
             }
             uart_puts("             check: SCS=PA8 SCLK=PB13 MOSI=PB15 MISO=PB14 5V GND\r\n");
         }
