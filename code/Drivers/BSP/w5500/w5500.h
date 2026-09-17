@@ -42,7 +42,6 @@ uint8_t  w5500_init(void);              /* 0 = 成功（软复位后 VERSIONR ==
 uint8_t  w5500_version(void);
 uint8_t  w5500_link_up(void);
 uint32_t w5500_error_count(void);
-void     w5500_set_log(void (*fn)(const char *msg));
 
 uint8_t  w5500_read(uint16_t addr, uint8_t bsb, uint8_t *buf, uint16_t len);
 uint8_t  w5500_write(uint16_t addr, uint8_t bsb, const uint8_t *buf, uint16_t len);

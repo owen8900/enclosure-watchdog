@@ -14,7 +14,6 @@
 
 static uint32_t s_err;
 static uint8_t  s_ver;
-static void   (*s_log)(const char *msg) = 0;
 
 /* 片选，低有效。与屏共用 SPI2 时，同时只有被选中的那个设备会理会总线 */
 static void w_cs(uint8_t assert)
@@ -103,11 +102,6 @@ uint8_t w5500_link_up(void)
 uint32_t w5500_error_count(void)
 {
     return s_err;
-}
-
-void w5500_set_log(void (*fn)(const char *msg))
-{
-    s_log = fn;
 }
 
 uint8_t w5500_init(void)
