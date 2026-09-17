@@ -31,6 +31,7 @@
 #include "ili9341.h"
 #include "lcd_ui.h"
 #include "xpt2046.h"
+#include "w5500.h"
 
 /* USER CODE END Includes */
 
@@ -584,6 +585,30 @@ int main(void)
         xpt2046_verify(XPT_SELFTEST_SECONDS);
     #endif
 #endif
+    }
+
+    /* M8：W5500 自检。先只读版本寄存器 —— 读到 0x04 就说明 SPI 三线、
+     * 片选、供电全对，不用急着联网。 */
+    {
+        uart_puts("W5500      : ");
+        if (w5500_init() == 0)
+        {
+            uart_puts("init OK  VERSIONR=0x");
+            uart_put_hex32((uint32_t)w5500_version());
+            uart_puts("  PHYCFGR=0x");
+            uart_put_hex32((uint32_t)w5500_read8(W5500_PHYCFGR, W5500_BSB_COMMON));
+            uart_puts(w5500_link_up() ? "  LINK=up" : "  LINK=down");
+            uart_puts("\r\n");
+        }
+        else
+        {
+            uart_puts("init ERR  version=0x");
+            uart_put_hex32((uint32_t)w5500_version());
+            uart_puts("  spi err total=");
+            uart_put_u32(w5500_error_count());
+            uart_puts("\r\n");
+            uart_puts("             check: SCS=PA8 SCLK=PB13 MOSI=PB15 MISO=PB14 5V GND\r\n");
+        }
     }
 
     /* M3：SD 卡 + FATFS

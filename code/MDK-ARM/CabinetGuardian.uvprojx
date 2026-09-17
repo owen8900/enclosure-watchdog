@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,STM32H750xx</Define>
               <Undefine></Undefine>
-              <IncludePath>../Core/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32H7xx/Include;../Drivers/CMSIS/Include;../FATFS/Target;../FATFS/App;../Middlewares/Third_Party/FatFs/src;../Drivers/BSP/ili9341;../Drivers/BSP/lcd_font;../Drivers/BSP/lcd_ui;../Drivers/BSP/xpt2046</IncludePath>
+              <IncludePath>../Core/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32H7xx/Include;../Drivers/CMSIS/Include;../FATFS/Target;../FATFS/App;../Middlewares/Third_Party/FatFs/src;../Drivers/BSP/ili9341;../Drivers/BSP/lcd_font;../Drivers/BSP/lcd_ui;../Drivers/BSP/xpt2046;../Drivers/BSP/w5500</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -1648,6 +1648,22 @@
             </File>
           </Files>
         </Group>
+        <Group>
+          <GroupName>BSP/w5500</GroupName>
+          <Files>
+            <File>
+              <FileName>w5500.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Drivers\BSP\w5500\w5500.c</FilePath>
+            </File>
+            <File>
+              <FileName>w5500.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Drivers\BSP\w5500\w5500.h</FilePath>
+            </File>
+          </Files>
+        </Group>
+
         <Group>
           <GroupName>Startup</GroupName>
           <Files>
