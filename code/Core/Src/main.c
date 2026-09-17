@@ -609,7 +609,7 @@ int main(void)
             uart_puts("\r\n");
             {
                 uint8_t p[8];
-                uint8_t i, any = 0u, all = 0xFFu;
+                uint8_t i, any = 0u, all = 0xFFu, idle;
 
                 w5500_bus_probe(p, 8u);
                 for (i = 0u; i < 8u; i++)
@@ -633,6 +633,12 @@ int main(void)
                 {
                     uart_puts("  MISO toggling   (chip alive: look elsewhere)\r\n");
                 }
+                idle = w5500_miso_idle();
+                uart_puts("             MISO idle with pullup = ");
+                uart_put_hex32((uint32_t)idle);
+                uart_puts((idle == 0u)
+                          ? "  (0 = something pulls it low: GND or unpowered module)\r\n"
+                          : "  (1 = nobody holds it: MISO not connected)\r\n");
             }
             uart_puts("             check: SCS=PA8 SCLK=PB13 MOSI=PB15 MISO=PB14 5V GND\r\n");
         }

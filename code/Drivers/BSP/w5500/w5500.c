@@ -9,6 +9,13 @@
 
 #include "w5500.h"
 #include "spi.h"
+#include "xpt2046.h"
+
+/* Plan A 的硬前提：PB14 得是 SPI2_MISO，而它原来被触摸时钟占着。
+ * 条件不满足就编译失败，免得编出一个 MISO 被触摸时钟占着的固件去插网线。 */
+#if !defined(XPT_CLK_ON_PC2) || (XPT_CLK_ON_PC2 != 1)
+  #error "W5500 needs PB14 as SPI2_MISO: set XPT_CLK_ON_PC2 to 1 (touch clock moves to PC2)"
+#endif
 
 #define W5500_SPI_TIMEOUT   100u
 
@@ -115,6 +122,29 @@ void w5500_bus_probe(uint8_t *out, uint8_t n)
 uint8_t w5500_version(void)
 {
     return s_ver;
+}
+
+/* MISO 开内部上拉读一次静态电平，读完把 PB14 还原成 SPI2_MISO（AF5）。
+ * 0 = 上拉都拉不起来，线上有东西在主动拉低（接错到 GND / 模块没电被钳位）
+ * 1 = 线上没人拉低（MISO 悬空没接上，或对方当前是高阻） */
+uint8_t w5500_miso_idle(void)
+{
+    GPIO_InitTypeDef g = {0};
+    uint8_t lvl;
+
+    g.Pin = GPIO_PIN_14;
+    g.Mode = GPIO_MODE_INPUT;
+    g.Pull = GPIO_PULLUP;
+    HAL_GPIO_Init(GPIOB, &g);
+
+    lvl = (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_14) == GPIO_PIN_SET) ? 1u : 0u;
+
+    g.Mode = GPIO_MODE_AF_PP;
+    g.Pull = GPIO_NOPULL;
+    g.Alternate = GPIO_AF5_SPI2;
+    HAL_GPIO_Init(GPIOB, &g);
+
+    return lvl;
 }
 
 /* PHYCFGR 的 bit0 = 链路状态：插上网线、对端也在跑时读 1 */
