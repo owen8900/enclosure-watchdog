@@ -184,35 +184,34 @@ static void bb_delay(void)
     }
 }
 
-static void bb_pin_mode(uint8_t data_mode)
+/* 切到位翻转要的方向：SCK/MOSI 输出，MISO 输入带上拉 */
+static void bb_pins_io(void)
 {
     GPIO_InitTypeDef g = {0};
 
-    if (data_mode != 0u)
-    {
-        /* SCK / MOSI 输出 */
-        g.Pin = GPIO_PIN_13 | GPIO_PIN_15;
-        g.Mode = GPIO_MODE_OUTPUT_PP;
-        g.Pull = GPIO_NOPULL;
-        g.Speed = GPIO_SPEED_FREQ_LOW;
-        HAL_GPIO_Init(GPIOB, &g);
+    g.Pin = GPIO_PIN_13 | GPIO_PIN_15;
+    g.Mode = GPIO_MODE_OUTPUT_PP;
+    g.Pull = GPIO_NOPULL;
+    g.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOB, &g);
 
-        /* MISO 输入 + 上拉 */
-        g.Pin = GPIO_PIN_14;
-        g.Mode = GPIO_MODE_INPUT;
-        g.Pull = GPIO_PULLUP;
-        HAL_GPIO_Init(GPIOB, &g);
-    }
-    else
-    {
-        /* 还原成 SPI2 的 AF5，别把总线留在位翻转状态 */
-        g.Pin = GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15;
-        g.Mode = GPIO_MODE_AF_PP;
-        g.Pull = GPIO_NOPULL;
-        g.Speed = GPIO_SPEED_FREQ_LOW;
-        g.Alternate = GPIO_AF5_SPI2;
-        HAL_GPIO_Init(GPIOB, &g);
-    }
+    g.Pin = GPIO_PIN_14;
+    g.Mode = GPIO_MODE_INPUT;
+    g.Pull = GPIO_PULLUP;
+    HAL_GPIO_Init(GPIOB, &g);
+}
+
+/* 三个脚还给 SPI2（AF5），别把总线留在位翻转状态 */
+static void bb_pins_af(void)
+{
+    GPIO_InitTypeDef g = {0};
+
+    g.Pin = GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15;
+    g.Mode = GPIO_MODE_AF_PP;
+    g.Pull = GPIO_NOPULL;
+    g.Speed = GPIO_SPEED_FREQ_LOW;
+    g.Alternate = GPIO_AF5_SPI2;
+    HAL_GPIO_Init(GPIOB, &g);
 }
 
 static void bb_out_bit(uint8_t bit)
@@ -253,7 +252,7 @@ uint8_t w5500_bitbang_version(void)
     uint8_t v = 0u;
     uint8_t i;
 
-    bb_pin_mode(1u);                        /* 切到位翻转用的方向 */
+    bb_pins_io();
     HAL_GPIO_WritePin(W5500_CS_PORT, W5500_CS_PIN, GPIO_PIN_RESET);
     bb_delay();
 
@@ -267,7 +266,7 @@ uint8_t w5500_bitbang_version(void)
     }
 
     HAL_GPIO_WritePin(W5500_CS_PORT, W5500_CS_PIN, GPIO_PIN_SET);
-    bb_pin_mode(0u);                        /* 还给 SPI2 */
+    bb_pins_af();
 
     return v;
 }
