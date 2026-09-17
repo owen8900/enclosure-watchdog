@@ -124,27 +124,38 @@ uint8_t w5500_version(void)
     return s_ver;
 }
 
-/* MISO 开内部上拉读一次静态电平，读完把 PB14 还原成 SPI2_MISO（AF5）。
- * 0 = 上拉都拉不起来，线上有东西在主动拉低（接错到 GND / 模块没电被钳位）
- * 1 = 线上没人拉低（MISO 悬空没接上，或对方当前是高阻） */
-uint8_t w5500_miso_idle(void)
+/* MISO 开内部上拉后的静态电平。读完把 PB14 还原成 SPI2_MISO（AF5）。
+ *
+ * ⚠️ 切换引脚模式后必须等一会儿再读：40kΩ 的内上拉给线容充电要几微秒，
+ * 切完立刻读会读到切换前的残留电平（第一版没等，把悬空误读成被拉低）。
+ * 所以这里两种都读：*fast = 立刻读到的（残留，留着当证据），返回值 = 2ms 后稳定值。
+ *
+ * 稳定值 0 = 线上有东西在主动拉低；1 = 没人拉低（悬空或对方高阻）。 */
+uint8_t w5500_miso_idle(uint8_t *fast)
 {
     GPIO_InitTypeDef g = {0};
-    uint8_t lvl;
+    uint8_t settled;
 
     g.Pin = GPIO_PIN_14;
     g.Mode = GPIO_MODE_INPUT;
     g.Pull = GPIO_PULLUP;
     HAL_GPIO_Init(GPIOB, &g);
 
-    lvl = (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_14) == GPIO_PIN_SET) ? 1u : 0u;
+    if (fast != 0)
+    {
+        *fast = (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_14) == GPIO_PIN_SET) ? 1u : 0u;
+    }
+
+    HAL_Delay(2u);              /* 等上拉把线充起来 */
+
+    settled = (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_14) == GPIO_PIN_SET) ? 1u : 0u;
 
     g.Mode = GPIO_MODE_AF_PP;
     g.Pull = GPIO_NOPULL;
     g.Alternate = GPIO_AF5_SPI2;
     HAL_GPIO_Init(GPIOB, &g);
 
-    return lvl;
+    return settled;
 }
 
 /* PHYCFGR 的 bit0 = 链路状态：插上网线、对端也在跑时读 1 */
