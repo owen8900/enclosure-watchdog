@@ -280,6 +280,7 @@ static void ui_refresh(uint32_t cycle, uint32_t spi_err, uint8_t sd_ok)
 #define TICK_TOUCH_MS      20u      /* 触摸扫描周期：50Hz 手感够，也不占 CPU */
 #define TICK_HB_MS       1000u      /* 心跳：串口一行 + 追加进 SD 日志 */
 #define TICK_UI_MS      10000u      /* 面板刷新（原来是每 10 轮，约 9 秒一次） */
+#define TICK_W5500_MS    1000u      /* W5500 状态监视：值一变就打印，排查接线用 */
 
 #define TOUCH_STATUS_Y    304u      /* 触摸状态行占用屏幕最底下 16 像素 */
 #define TOUCH_MARK_COLOR  ILI9341_RED
@@ -832,6 +833,7 @@ int main(void)
   uint32_t t_touch  = HAL_GetTick();
   uint32_t t_hb     = HAL_GetTick();
   uint32_t t_ui     = HAL_GetTick();
+  uint32_t t_w5     = HAL_GetTick();
   uint8_t  led_step = 0u;
 
   /* Infinite loop */
@@ -862,6 +864,23 @@ int main(void)
         t_touch = now;
         touch_poll();
         touch_marker_tick();
+    }
+
+    /* W5500 监视：只在值变化时打印，插着电动着线就能看串口反应 */
+    if ((now - t_w5) >= TICK_W5500_MS)
+    {
+        static uint8_t last_ver = 0xFFu;
+        uint8_t        ver;
+
+        t_w5 = now;
+        ver = w5500_read8(W5500_VERSIONR, W5500_BSB_COMMON);
+        if (ver != last_ver)
+        {
+            last_ver = ver;
+            uart_puts("W5500 watch: VERSIONR=0x");
+            uart_put_hex32((uint32_t)ver);
+            uart_puts((ver == 0x04u) ? "  OK\r\n" : "  (should be 0x04)\r\n");
+        }
     }
 
     /* 心跳：串口一行 + 追加进 SD 日志 */
