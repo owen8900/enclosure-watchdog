@@ -96,8 +96,9 @@ void w5500_write8(uint16_t addr, uint8_t bsb, uint8_t val)
     (void)w5500_write(addr, bsb, &val, 1u);
 }
 
-/* 总线探针：CS 拉低后连发 8 个 0xFF（当作读操作），把 MISO 上看到的字节带出去。
- * 用来区分"完全没通信"的几种原因：恒低 = 没接/没电；恒高 = 浮空；有跳变 = 芯片活着。 */
+/* 总线探针：发一个"真正的 VERSIONR 读帧"（0x00 0x39 0x80，后面补 0x00 把数据移出来），
+ * 把 MISO 上看到的字节原样带出去。判据唯一：out[3] == 0x04 就是芯片正常应答。
+ * 前 3 字节本来就是 0x00 —— 地址相位期间从机不驱动 MISO，那三个 0 说明不了问题。 */
 void w5500_bus_probe(uint8_t *out, uint8_t n)
 {
     uint8_t i;
@@ -108,7 +109,12 @@ void w5500_bus_probe(uint8_t *out, uint8_t n)
     }
     for (i = 0; i < n; i++)
     {
-        s_tx[i] = 0xFFu;
+        s_tx[i] = 0x00u;
+    }
+    if (n >= 4u)
+    {
+        s_tx[1] = 0x39u;                    /* 地址低字节 = VERSIONR */
+        s_tx[2] = 0x80u;                    /* RWB=1 读 | BSB=0 common */
     }
 
     w_cs(1u);

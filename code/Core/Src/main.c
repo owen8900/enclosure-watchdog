@@ -622,30 +622,18 @@ int main(void)
             uart_puts("\r\n");
             {
                 uint8_t p[8];
-                uint8_t i, any = 0u, all = 0xFFu, idle, idle_fast;
+                uint8_t i, idle, idle_fast;
 
                 w5500_bus_probe(p, 8u);
+                uart_puts("             VERSIONR read frame:");
                 for (i = 0u; i < 8u; i++)
                 {
-                    any |= p[i];
-                    all &= p[i];
+                    uart_puts(" ");
+                    uart_put_hex2(p[i]);
                 }
-                uart_puts("             MISO probe: OR=0x");
-                uart_put_hex32((uint32_t)any);
-                uart_puts(" AND=0x");
-                uart_put_hex32((uint32_t)all);
-                if (any == 0u)
-                {
-                    uart_puts("  MISO stuck LOW  (no wire / no power / pulled low)\r\n");
-                }
-                else if (all == 0xFFu)
-                {
-                    uart_puts("  MISO stuck HIGH (no wire / floating)\r\n");
-                }
-                else
-                {
-                    uart_puts("  MISO toggling   (chip alive: look elsewhere)\r\n");
-                }
+                uart_puts((p[3] == 0x04u)
+                          ? "  -> chip answered OK\r\n"
+                          : "  -> byte[3] should be 04 (address not received: check MOSI)\r\n");
                 idle = w5500_miso_idle(&idle_fast);
                 uart_puts("             MISO idle: fast=");
                 uart_put_hex32((uint32_t)idle_fast);
