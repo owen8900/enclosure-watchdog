@@ -882,16 +882,23 @@ int main(void)
     if ((now - t_w5) >= TICK_W5500_MS)
     {
         static uint8_t last_ver = 0xFFu;
+        static uint8_t quiet    = 0u;
         uint8_t        ver;
 
         t_w5 = now;
         ver = w5500_read8(W5500_VERSIONR, W5500_BSB_COMMON);
-        if (ver != last_ver)
+        quiet++;
+        if ((ver != last_ver) || (quiet >= 5u))     /* 变了立刻报，否则每 5 秒报一次看趋势 */
         {
             last_ver = ver;
+            quiet    = 0u;
             uart_puts("W5500 watch: VERSIONR=0x");
             uart_put_hex32((uint32_t)ver);
-            uart_puts((ver == 0x04u) ? "  OK\r\n" : "  (should be 0x04)\r\n");
+            uart_puts("  err=");
+            uart_put_u32(w5500_error_count());
+            uart_puts("  spi2_state=");
+            uart_put_u32((uint32_t)hspi2.State);
+            uart_puts((ver == 0x04u) ? "  OK\r\n" : "\r\n");
         }
     }
 
