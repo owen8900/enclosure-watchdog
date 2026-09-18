@@ -1,7 +1,7 @@
 ﻿/**
   ******************************************************************************
   * 文件    : w5500.c
-  * 功能    : W5500 以太网控制器（SPI）驱动实现
+  * 功能    : W5500 以太网控制器（SPI）驱动实现 + socket0 上的 UDP 收发
   * 说明    : 地址相位 3 字节 = addr[15:8] / addr[7:0] / (BSB<<3 | RWB)，读 RWB=0
   * 约定    : 每次传输都带超时（100ms），失败计数，不无限阻塞
   ******************************************************************************
@@ -10,6 +10,7 @@
 #include "w5500.h"
 #include "spi.h"
 #include "xpt2046.h"
+#include <string.h>
 
 /* Plan A 的硬前提：PB14 得是 SPI2_MISO，而它原来被触摸时钟占着。
  * 条件不满足就编译失败，免得编出一个 MISO 被触摸时钟占着的固件去插网线。 */
@@ -20,6 +21,7 @@
 #define W5500_SPI_TIMEOUT   100u
 
 static uint32_t s_err;
+static uint32_t s_rxerr;   /* 收包时读失败的次数，watch 行里看 */
 static uint8_t  s_ver;
 static uint8_t  s_tx[8];      /* 探针用：发 0xFF 看 MISO */
 
@@ -277,6 +279,479 @@ uint8_t w5500_bitbang_read8(uint16_t addr, uint8_t bsb)
     bb_pins_af();
 
     return v;
+}
+
+/* ---------------------------------------------------------------
+ * socket0 上的 UDP：静态 IP + 收发
+ * 命令与指针操作照官方 ioLibrary 的顺序：先等缓存空间，再写指针和数据，
+ * 发 SEND/RECV 命令后必须等 Sn_CR 被芯片清零。
+ * --------------------------------------------------------------- */
+
+static void (*s_log)(const char *) = 0;
+
+void w5500_set_log(void (*log)(const char *s))
+{
+    s_log = log;
+}
+
+static void w_log(const char *s)
+{
+    if (s_log != 0)
+    {
+        s_log(s);
+    }
+}
+
+/* socket 的寄存器块选择位：REG = 1+4n、TX = 2+4n、RX = 3+4n（官方 w5500.h 的编码） */
+static uint8_t w5500_bsb_reg(uint8_t s) { return (uint8_t)(0x01u + 4u * s); }
+static uint8_t w5500_bsb_tx(uint8_t s)  { return (uint8_t)(0x02u + 4u * s); }
+static uint8_t w5500_bsb_rx(uint8_t s)  { return (uint8_t)(0x03u + 4u * s); }
+
+/* socket 里的 16 位寄存器是高字节在前（大端），别按小端读 */
+static uint16_t sn_read16(uint8_t s, uint16_t reg)
+{
+    uint8_t b[2];
+
+    if (w5500_read(reg, w5500_bsb_reg(s), b, 2u) != 0u)
+    {
+        return 0u;
+    }
+    return (uint16_t)(((uint16_t)b[0] << 8) | (uint16_t)b[1]);
+}
+
+static void sn_write16(uint8_t s, uint16_t reg, uint16_t val)
+{
+    uint8_t b[2];
+
+    b[0] = (uint8_t)(val >> 8);
+    b[1] = (uint8_t)(val & 0xFFu);
+    (void)w5500_write(reg, w5500_bsb_reg(s), b, 2u);
+}
+
+/* 写 Sn_CR 后等芯片把它清零：清完才代表命令被接收 */
+static uint8_t sn_cmd(uint8_t s, uint8_t cr)
+{
+    uint32_t t0 = HAL_GetTick();
+
+    w5500_write8(W5500_SN_CR, w5500_bsb_reg(s), cr);
+    while (w5500_read8(W5500_SN_CR, w5500_bsb_reg(s)) != 0u)
+    {
+        if ((HAL_GetTick() - t0) > 100u)
+        {
+            s_err++;
+            return 1u;
+        }
+    }
+    return 0u;
+}
+
+/* 配 MAC/IP/网关/掩码，写完读回比一遍 —— 写没进去在启动日志里就能看出来 */
+uint8_t w5500_net_setup(void)
+{
+    static const uint8_t mac[6]  = W5500_CFG_MAC;
+    static const uint8_t ip[4]   = W5500_CFG_IP;
+    static const uint8_t gw[4]   = W5500_CFG_GW;
+    static const uint8_t mask[4] = W5500_CFG_MASK;
+    uint8_t rd[6];
+
+    if (w5500_write(W5500_SHAR, W5500_BSB_COMMON, mac, 6u) != 0u)  return 1u;
+    if (w5500_write(W5500_SIPR, W5500_BSB_COMMON, ip, 4u) != 0u)   return 1u;
+    if (w5500_write(W5500_GAR, W5500_BSB_COMMON, gw, 4u) != 0u)    return 1u;
+    if (w5500_write(W5500_SUBR, W5500_BSB_COMMON, mask, 4u) != 0u) return 1u;
+
+    if (w5500_read(W5500_SIPR, W5500_BSB_COMMON, rd, 4u) != 0u)    return 2u;
+    if (memcmp(rd, ip, 4u) != 0)                                   return 2u;
+    if (w5500_read(W5500_SHAR, W5500_BSB_COMMON, rd, 6u) != 0u)    return 3u;
+    if (memcmp(rd, mac, 6u) != 0)                                  return 3u;
+
+    return 0u;
+}
+
+uint8_t w5500_socket_sr(uint8_t s)
+{
+    return w5500_read8(W5500_SN_SR, w5500_bsb_reg(s));
+}
+
+/* 顺序照手册：先 CLOSE 清旧状态，再写模式/端口/缓存，最后 OPEN，看 Sn_SR 对不对 */
+uint8_t w5500_udp_open(uint8_t s, uint16_t port)
+{
+    uint8_t bsb = w5500_bsb_reg(s);
+    uint8_t b[2];
+
+    if (s > 7u)
+    {
+        return 1u;
+    }
+
+    (void)sn_cmd(s, W5500_SN_CR_CLOSE);
+    w5500_write8(W5500_SN_IR, bsb, 0xFFu);          /* 清掉上一轮的残留中断 */
+
+    w5500_write8(W5500_SN_MR, bsb, W5500_SN_MR_UDP);
+    b[0] = (uint8_t)(port >> 8);
+    b[1] = (uint8_t)(port & 0xFFu);
+    (void)w5500_write(W5500_SN_PORT, bsb, b, 2u);
+    w5500_write8(W5500_SN_RXBUF_SIZE, bsb, 2u);     /* 2KB，默认值，显式写一遍 */
+    w5500_write8(W5500_SN_TXBUF_SIZE, bsb, 2u);
+
+    if (sn_cmd(s, W5500_SN_CR_OPEN) != 0u)
+    {
+        return 2u;
+    }
+    return (w5500_socket_sr(s) == W5500_SN_SR_UDP) ? 0u : 3u;
+}
+
+/* UDP 发送。先看目的 IP 和端口，再确认缓存够大；ARP 不通时芯片会等
+ * RTR*RCR 约 1.8 秒才置 TIMEOUT，所以这里给 3 秒就够判"发不出去"。 */
+uint8_t w5500_udp_send(uint8_t s, const uint8_t dip[4], uint16_t dport,
+                       const uint8_t *buf, uint16_t len)
+{
+    uint8_t  bsb_reg = w5500_bsb_reg(s);
+    uint16_t wr;
+    uint32_t t0;
+    uint8_t  ir;
+
+    if (len == 0u || len > W5500_BUF_SIZE)
+    {
+        return 1u;
+    }
+    if (w5500_socket_sr(s) != W5500_SN_SR_UDP)
+    {
+        return 2u;
+    }
+
+    t0 = HAL_GetTick();
+    while (sn_read16(s, W5500_SN_TX_FSR) < len)
+    {
+        if ((HAL_GetTick() - t0) > 5000u)
+        {
+            s_err++;
+            return 3u;                  /* 上一包还没发出去 */
+        }
+        HAL_Delay(1u);
+    }
+
+    if (w5500_write(W5500_SN_DIPR, bsb_reg, dip, 4u) != 0u)
+    {
+        return 4u;
+    }
+    sn_write16(s, W5500_SN_DPORT, dport);
+
+    wr = sn_read16(s, W5500_SN_TX_WR);
+    if (w5500_write(wr, w5500_bsb_tx(s), buf, len) != 0u)
+    {
+        return 5u;
+    }
+    sn_write16(s, W5500_SN_TX_WR, (uint16_t)(wr + len));    /* 16 位指针自己回绕 */
+
+    if (sn_cmd(s, W5500_SN_CR_SEND) != 0u)
+    {
+        return 6u;
+    }
+
+    t0 = HAL_GetTick();
+    for (;;)
+    {
+        ir = w5500_read8(W5500_SN_IR, bsb_reg);
+        if ((ir & W5500_SN_IR_SEND_OK) != 0u)
+        {
+            w5500_write8(W5500_SN_IR, bsb_reg, W5500_SN_IR_SEND_OK);
+            return 0u;
+        }
+        if ((ir & W5500_SN_IR_TIMEOUT) != 0u)
+        {
+            w5500_write8(W5500_SN_IR, bsb_reg, W5500_SN_IR_TIMEOUT);
+            return 7u;                  /* ARP 没应答：目的 IP 不通或网段不对 */
+        }
+        if ((HAL_GetTick() - t0) > 3000u)
+        {
+            return 8u;
+        }
+        HAL_Delay(1u);
+    }
+}
+
+/* 收一包。UDP 模式下缓存最前面 8 字节是来源信息，读完要把 Sn_RX_RD 推到包尾
+ * 再发 RECV，少了这一步同一包会被反复读出来。 */
+uint16_t w5500_udp_recv(uint8_t s, uint8_t *buf, uint16_t max,
+                        uint8_t from_ip[4], uint16_t *from_port)
+{
+    uint8_t  head[W5500_UDP_INFO_LEN];
+    uint16_t rd;
+    uint16_t total;
+    uint16_t n;
+
+    if (sn_read16(s, W5500_SN_RX_RSR) < W5500_UDP_INFO_LEN)
+    {
+        return 0u;
+    }
+
+    rd = sn_read16(s, W5500_SN_RX_RD);
+    if (w5500_read(rd, w5500_bsb_rx(s), head, W5500_UDP_INFO_LEN) != 0u)
+    {
+        s_rxerr++;
+        return 0u;
+    }
+
+    if (from_ip != 0)
+    {
+        from_ip[0] = head[0];
+        from_ip[1] = head[1];
+        from_ip[2] = head[2];
+        from_ip[3] = head[3];
+    }
+    if (from_port != 0)
+    {
+        *from_port = (uint16_t)(((uint16_t)head[4] << 8) | (uint16_t)head[5]);
+    }
+
+    total = (uint16_t)(((uint16_t)head[6] << 8) | (uint16_t)head[7]);  /* 包长来自头部，不是 RSR */
+    n = total;
+    if (n > max)
+    {
+        n = max;
+    }
+    if (n > W5500_BUF_SIZE)
+    {
+        n = W5500_BUF_SIZE;
+    }
+    if (n > 0u)
+    {
+        if (w5500_read((uint16_t)(rd + W5500_UDP_INFO_LEN), w5500_bsb_rx(s), buf, n) != 0u)
+        {
+            s_rxerr++;
+            return 0u;
+        }
+    }
+
+    /* 读指针推到包尾再发 RECV，不然同一包会被反复读出来；16 位指针自己回绕 */
+    sn_write16(s, W5500_SN_RX_RD, (uint16_t)(rd + W5500_UDP_INFO_LEN + total));
+    if (sn_cmd(s, W5500_SN_CR_RECV) != 0u)
+    {
+        return 0u;
+    }
+
+    return n;
+}
+
+/* 日志里打数字：串口打印只走 ASCII，不引 printf */
+static void w_log_u32(uint32_t v)
+{
+    char t[10];
+    char c[2];
+    int  i = 0;
+
+    if (v == 0u)
+    {
+        w_log("0");
+        return;
+    }
+    while (v > 0u && i < 10)
+    {
+        t[i++] = (char)('0' + (char)(v % 10u));
+        v /= 10u;
+    }
+    c[1] = 0;
+    while (i > 0)
+    {
+        c[0] = t[--i];
+        w_log(c);
+    }
+}
+
+/* 拼 "CG UDP heartbeat N\r\n"，不用 printf */
+static uint16_t build_heartbeat(uint8_t *buf, uint16_t seq)
+{
+    static const char head[] = "CG UDP heartbeat ";
+    char    num[6];
+    uint16_t i = 0u;
+    uint16_t j;
+    uint16_t k = 0u;
+
+    for (j = 0u; head[j] != 0; j++)
+    {
+        buf[i++] = (uint8_t)head[j];
+    }
+    while (seq > 0u && k < 5u)
+    {
+        num[k++] = (char)('0' + (char)(seq % 10u));
+        seq /= 10u;
+    }
+    if (k == 0u)
+    {
+        num[k++] = '0';
+    }
+    while (k > 0u)
+    {
+        buf[i++] = (uint8_t)num[--k];
+    }
+    buf[i++] = (uint8_t)'\r';
+    buf[i++] = (uint8_t)'\n';
+
+    return i;
+}
+
+/* 网络起来：配静态 IP + 开 socket0 UDP。0 = 全好，1 = 配网失败，2 = socket 没开起来 */
+uint8_t w5500_net_up(void)
+{
+    uint8_t rc = w5500_net_setup();
+
+    if (rc != 0u)
+    {
+        w_log("net cfg ERR ");
+        w_log_u32((uint32_t)rc);        /* 1=写失败 2=IP 读回不符 3=MAC 读回不符 */
+        w_log("\r\n");
+        return 1u;
+    }
+    w_log("net cfg OK\r\n");
+    w_log((w5500_link_up() != 0u) ? "link up\r\n" : "link down, check cable\r\n");
+
+    rc = w5500_udp_open(0u, W5500_CFG_LOCAL_PORT);
+    if (rc != 0u)
+    {
+        w_log("udp open ERR ");
+        w_log_u32((uint32_t)rc);        /* 3 = Sn_SR 不是 0x22 */
+        w_log("\r\n");
+        return 2u;
+    }
+    w_log("udp open OK  port 5000\r\n");
+
+    return 0u;
+}
+
+static void w_log_hex2(uint8_t v)
+{
+    static const char hx[] = "0123456789ABCDEF";
+    char c[2];
+
+    c[1] = 0;
+    c[0] = hx[(v >> 4) & 0x0Fu];
+    w_log(c);
+    c[0] = hx[v & 0x0Fu];
+    w_log(c);
+}
+
+/* 收到的内容可能是任意字节，非可打印的打成点，免得串口乱码 */
+static void w_log_ascii(const uint8_t *buf, uint16_t n)
+{
+    char c[2];
+    uint16_t i;
+
+    c[1] = 0;
+    for (i = 0u; i < n; i++)
+    {
+        uint8_t b = buf[i];
+
+        if ((b == (uint8_t)'\r') || (b == (uint8_t)'\n'))
+        {
+            continue;
+        }
+        c[0] = ((b >= 0x20u) && (b < 0x7Fu)) ? (char)b : '.';
+        w_log(c);
+    }
+}
+
+/* 收一包：打印来源和内容，再原样回一个。没数据立刻返回，主循环里随便调 */
+void w5500_udp_poll(void)
+{
+    static uint8_t rx[160];
+    uint8_t  from[4];
+    uint16_t from_port = 0u;
+    uint16_t n;
+
+    n = w5500_udp_recv(0u, rx, (uint16_t)sizeof(rx), from, &from_port);
+    if (n == 0u)
+    {
+        return;
+    }
+
+    w_log("udp recv ");
+    w_log_u32((uint32_t)n);
+    w_log(" B from ");
+    w_log_u32((uint32_t)from[0]);
+    w_log(".");
+    w_log_u32((uint32_t)from[1]);
+    w_log(".");
+    w_log_u32((uint32_t)from[2]);
+    w_log(".");
+    w_log_u32((uint32_t)from[3]);
+    w_log(":");
+    w_log_u32((uint32_t)from_port);
+    w_log("  [");
+    w_log_ascii(rx, n);
+    w_log("]\r\n");
+
+    (void)w5500_udp_send(0u, from, from_port, rx, n);   /* 原样回一个，PC 上能看到闭环 */
+}
+
+/* 心跳：每秒一包。只在"发失败"和"恢复"这两个转折点打印，免得串口被刷屏 */
+void w5500_udp_send_heartbeat(void)
+{
+    static const uint8_t pc[4] = W5500_CFG_PC_IP;
+    static uint8_t  tx[40];
+    static uint16_t seq = 0u;
+    static uint8_t  failing = 0u;
+    uint16_t len;
+    uint8_t  rc;
+
+    seq++;
+    len = build_heartbeat(tx, seq);
+    rc = w5500_udp_send(0u, pc, W5500_CFG_PC_PORT, tx, len);
+
+    if (rc != 0u)
+    {
+        if (failing == 0u)
+        {
+            w_log("udp send ERR ");
+            w_log_u32((uint32_t)rc);    /* 7 = ARP 超时：PC 的 IP 或网段不对 */
+            w_log("\r\n");
+        }
+        failing = 1u;
+    }
+    else if (failing != 0u)
+    {
+        failing = 0u;
+        w_log("udp send OK again\r\n");
+    }
+}
+
+/* 主循环里的诊断行：把读 VERSIONR 的原始帧带出来，再加 RTR（应为 07D0）和 socket0 状态
+ * （应为 22）对账 —— 读回 0x00 时就能分清"芯片没应答"和"芯片真的回了 0"。 */
+void w5500_watch_dump(void)
+{
+    uint8_t  p[4];
+    uint8_t  rb[2];
+    uint8_t  i;
+    uint16_t rtr;
+
+    w5500_bus_probe(p, 4u);
+    (void)w5500_read(W5500_RTR, W5500_BSB_COMMON, rb, 2u);
+    rtr = (uint16_t)(((uint16_t)rb[0] << 8) | (uint16_t)rb[1]);
+
+    w_log("W5500 watch: frame=");
+    for (i = 0u; i < 4u; i++)
+    {
+        w_log_hex2(p[i]);
+        w_log(" ");
+    }
+    w_log(" VERSIONR=0x");
+    w_log_hex2(w5500_read8(W5500_VERSIONR, W5500_BSB_COMMON));
+    w_log(" RTR=0x");
+    w_log_hex2((uint8_t)(rtr >> 8));
+    w_log_hex2((uint8_t)(rtr & 0xFFu));
+    w_log(" sr0=0x");
+    w_log_hex2(w5500_socket_sr(0u));
+    w_log(" rsr=0x");
+    {
+        uint16_t rsr = sn_read16(0u, W5500_SN_RX_RSR);
+
+        w_log_hex2((uint8_t)(rsr >> 8));
+        w_log_hex2((uint8_t)(rsr & 0xFFu));
+    }
+    w_log(" rxerr=");
+    w_log_u32(s_rxerr);
+    w_log(" err=");
+    w_log_u32(w5500_error_count());
+    w_log("\r\n");
 }
 
 uint8_t w5500_init(void)

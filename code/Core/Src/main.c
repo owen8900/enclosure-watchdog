@@ -292,7 +292,7 @@ static void ui_refresh(uint32_t cycle, uint32_t spi_err, uint8_t sd_ok)
 #define TICK_TOUCH_MS      20u      /* 触摸扫描周期：50Hz 手感够，也不占 CPU */
 #define TICK_HB_MS       1000u      /* 心跳：串口一行 + 追加进 SD 日志 */
 #define TICK_UI_MS      10000u      /* 面板刷新（原来是每 10 轮，约 9 秒一次） */
-#define TICK_W5500_MS    1000u      /* W5500 状态监视：值一变就打印，排查接线用 */
+#define TICK_W5500_MS    5000u      /* W5500 状态监视：原始读帧诊断，5 秒一行 */
 
 #define TOUCH_STATUS_Y    304u      /* 触摸状态行占用屏幕最底下 16 像素 */
 #define TOUCH_MARK_COLOR  ILI9341_RED
@@ -603,6 +603,7 @@ int main(void)
     /* M8：W5500 自检。先只读版本寄存器 —— 读到 0x04 就说明 SPI 三线、
      * 片选、供电全对，不用急着联网。 */
     {
+        w5500_set_log(uart_puts);
         uart_puts("W5500      : ");
         if (w5500_init() == 0)
         {
@@ -664,6 +665,20 @@ int main(void)
             uart_puts("             check: SCS=PA8 SCLK=PB13 MOSI=PB15 MISO=PB14 5V GND\r\n");
         }
     }
+
+    /* M9：静态 IP + UDP 自检（开关 W5500_NET_TEST 在 w5500.h）。
+     * 网线插好后跑这一段：PC 的 NetAssist 每秒收到一行心跳，
+     * 从 NetAssist 发的包会在这里打印来源并原样回一个。 */
+#if W5500_NET_TEST
+    if (w5500_version() == 0x04u)
+    {
+        (void)w5500_net_up();
+    }
+    else
+    {
+        uart_puts("W5500 net  : skip, M8 did not answer\r\n");
+    }
+#endif
 
     /* M3：SD 卡 + FATFS
      * 顺序有讲究：CubeMX 使能 FATFS 后，不再由 sdmmc.c 初始化卡，改由 FATFS 的
@@ -846,6 +861,7 @@ int main(void)
   uint32_t t_hb     = HAL_GetTick();
   uint32_t t_ui     = HAL_GetTick();
   uint32_t t_w5     = HAL_GetTick();
+  uint32_t t_udp    = HAL_GetTick();
   uint8_t  led_step = 0u;
 
   /* Infinite loop */
@@ -878,28 +894,21 @@ int main(void)
         touch_marker_tick();
     }
 
-    /* W5500 监视：只在值变化时打印，插着电动着线就能看串口反应 */
+    /* W5500 网络：收包随时处理，心跳按周期发 */
+#if W5500_NET_TEST
+    w5500_udp_poll();
+    if ((now - t_udp) >= W5500_UDP_HB_MS)
+    {
+        t_udp = now;
+        w5500_udp_send_heartbeat();
+    }
+#endif
+
+    /* W5500 监视：每 5 秒一行原始读帧，查"初始化能读、进主循环读回 0" */
     if ((now - t_w5) >= TICK_W5500_MS)
     {
-        static uint8_t last_ver = 0xFFu;
-        static uint8_t quiet    = 0u;
-        uint8_t        ver;
-
         t_w5 = now;
-        ver = w5500_read8(W5500_VERSIONR, W5500_BSB_COMMON);
-        quiet++;
-        if ((ver != last_ver) || (quiet >= 5u))     /* 变了立刻报，否则每 5 秒报一次看趋势 */
-        {
-            last_ver = ver;
-            quiet    = 0u;
-            uart_puts("W5500 watch: VERSIONR=0x");
-            uart_put_hex32((uint32_t)ver);
-            uart_puts("  err=");
-            uart_put_u32(w5500_error_count());
-            uart_puts("  spi2_state=");
-            uart_put_u32((uint32_t)hspi2.State);
-            uart_puts((ver == 0x04u) ? "  OK\r\n" : "\r\n");
-        }
+        w5500_watch_dump();
     }
 
     /* 心跳：串口一行 + 追加进 SD 日志 */
