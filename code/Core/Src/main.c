@@ -129,6 +129,18 @@ static void uart_put_hex32(uint32_t v)
     uart_puts(buf);
 }
 
+/* 打一个字节的两位十六进制，只给诊断用 */
+static void uart_put_hex2(uint8_t b)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    char buf[3];
+
+    buf[0] = hex[(b >> 4) & 0x0Fu];
+    buf[1] = hex[b & 0x0Fu];
+    buf[2] = '\0';
+    uart_puts(buf);
+}
+
 /* uint32 -> 十进制 ASCII，写进 out[]，返回字节数（不写结尾 '\0'） */
 static int u32_to_str(uint32_t v, char *out)
 {
@@ -643,11 +655,23 @@ int main(void)
                           ? "  (settled 0: something holds it low)\r\n"
                           : "  (settled 1: nobody drives it = floating or Hi-Z)\r\n");
 
+                uart_puts("             probe bytes:");
+                for (i = 0u; i < 8u; i++)
+                {
+                    uart_puts(" ");
+                    uart_put_hex2(p[i]);
+                }
+                uart_puts("\r\n");
+
                 /* 位翻转慢速 SPI 再读一次：绕过 SPI2 外设，
                  * 把"模块不搭话"和"SPI2 配置有问题"分开 */
-                uart_puts("             VERSIONR via bitbang SPI = 0x");
-                uart_put_hex32((uint32_t)w5500_bitbang_version());
-                uart_puts("  (0x04 = module alive, check SPI2 side)\r\n");
+                uart_puts("             via bitbang: VERSIONR=0x");
+                uart_put_hex2(w5500_bitbang_read8(W5500_VERSIONR, W5500_BSB_COMMON));
+                uart_puts("  RTR hi=0x");
+                uart_put_hex2(w5500_bitbang_read8(W5500_RTR, W5500_BSB_COMMON));
+                uart_puts(" lo=0x");
+                uart_put_hex2(w5500_bitbang_read8((uint16_t)(W5500_RTR + 1u), W5500_BSB_COMMON));
+                uart_puts("  (expect 04 / 07 / D0)\r\n");
             }
             uart_puts("             check: SCS=PA8 SCLK=PB13 MOSI=PB15 MISO=PB14 5V GND\r\n");
         }

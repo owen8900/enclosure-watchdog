@@ -247,7 +247,7 @@ static void bb_out_byte(uint8_t val)
     }
 }
 
-uint8_t w5500_bitbang_version(void)
+uint8_t w5500_bitbang_read8(uint16_t addr, uint8_t bsb)
 {
     uint8_t v = 0u;
     uint8_t i;
@@ -256,9 +256,9 @@ uint8_t w5500_bitbang_version(void)
     HAL_GPIO_WritePin(W5500_CS_PORT, W5500_CS_PIN, GPIO_PIN_RESET);
     bb_delay();
 
-    bb_out_byte(0x00u);                     /* 地址高字节 */
-    bb_out_byte(0x39u);                     /* 地址低字节 = VERSIONR */
-    bb_out_byte(0x80u);                     /* RWB=1 读 | BSB=0 common */
+    bb_out_byte((uint8_t)(addr >> 8));                      /* 地址高字节 */
+    bb_out_byte((uint8_t)(addr & 0xFFu));                   /* 地址低字节 */
+    bb_out_byte((uint8_t)(0x80u | (bsb & 0x1Fu)));          /* RWB=1 读 | BSB */
 
     for (i = 0u; i < 8u; i++)
     {
