@@ -2,7 +2,7 @@
   ******************************************************************************
   * 文件    : w5500.c
   * 功能    : W5500 以太网控制器（SPI）驱动实现
-  * 说明    : 地址相位 3 字节 = addr[15:8] / addr[7:0] / (RWB<<7 | BSB)
+  * 说明    : 地址相位 3 字节 = addr[15:8] / addr[7:0] / (BSB<<3 | RWB)，读 RWB=0
   * 约定    : 每次传输都带超时（100ms），失败计数，不无限阻塞
   ******************************************************************************
   */
@@ -30,14 +30,16 @@ static void w_cs(uint8_t assert)
                       assert ? GPIO_PIN_RESET : GPIO_PIN_SET);
 }
 
-/* 发地址相位 3 字节 */
+/* 发地址相位 3 字节。控制字节 = BSB[7:3] | RWB[2]：读 0x00、写 0x04。
+ * 这一点踩过坑：原来按读位 0x80 发，等于每次读都在对错误块发写命令，
+ * 芯片从不驱动 MISO，VERSIONR 一直读回 0x00。 */
 static uint8_t w_addr(uint16_t addr, uint8_t bsb, uint8_t read_op)
 {
     uint8_t h[3];
 
     h[0] = (uint8_t)(addr >> 8);
     h[1] = (uint8_t)(addr & 0xFFu);
-    h[2] = (uint8_t)((read_op ? 0x80u : 0x00u) | (bsb & 0x1Fu));
+    h[2] = (uint8_t)((uint8_t)(bsb << 3) | (read_op ? 0x00u : 0x04u));
 
     if (HAL_SPI_Transmit(&hspi2, h, 3u, W5500_SPI_TIMEOUT) != HAL_OK)
     {
@@ -96,7 +98,7 @@ void w5500_write8(uint16_t addr, uint8_t bsb, uint8_t val)
     (void)w5500_write(addr, bsb, &val, 1u);
 }
 
-/* 总线探针：发一个"真正的 VERSIONR 读帧"（0x00 0x39 0x80，后面补 0x00 把数据移出来），
+/* 总线探针：发一个"真正的 VERSIONR 读帧"（0x00 0x39 0x00，后面补 0x00 把数据移出来），
  * 把 MISO 上看到的字节原样带出去。判据唯一：out[3] == 0x04 就是芯片正常应答。
  * 前 3 字节本来就是 0x00 —— 地址相位期间从机不驱动 MISO，那三个 0 说明不了问题。 */
 void w5500_bus_probe(uint8_t *out, uint8_t n)
@@ -114,7 +116,7 @@ void w5500_bus_probe(uint8_t *out, uint8_t n)
     if (n >= 4u)
     {
         s_tx[1] = 0x39u;                    /* 地址低字节 = VERSIONR */
-        s_tx[2] = 0x80u;                    /* RWB=1 读 | BSB=0 common */
+        s_tx[2] = 0x00u;                    /* BSB=0 common | 读(0x00) */
     }
 
     w_cs(1u);
@@ -264,7 +266,7 @@ uint8_t w5500_bitbang_read8(uint16_t addr, uint8_t bsb)
 
     bb_out_byte((uint8_t)(addr >> 8));                      /* 地址高字节 */
     bb_out_byte((uint8_t)(addr & 0xFFu));                   /* 地址低字节 */
-    bb_out_byte((uint8_t)(0x80u | (bsb & 0x1Fu)));          /* RWB=1 读 | BSB */
+    bb_out_byte((uint8_t)((uint8_t)(bsb << 3) | 0x00u));    /* BSB | 读 */
 
     for (i = 0u; i < 8u; i++)
     {

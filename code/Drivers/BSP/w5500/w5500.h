@@ -21,11 +21,14 @@
 #define W5500_CS_PORT       GPIOA
 #define W5500_CS_PIN        GPIO_PIN_8
 
-/* 块选择位（地址相位第 3 字节的低 5 位） */
+/* 块选择位。控制字节 = BSB[7:3] | RWB[2] | 模式[1:0]，所以这里存的是
+ * 未移位的 BSB 值，发帧时左移 3 位（见 w_addr()）。
+ * 编码规则出自官方 WIZnet ioLibrary_Driver/Ethernet/W5500/w5500.h：
+ *   WIZCHIP_CREG_BLOCK 0x00 / WIZCHIP_SREG_BLOCK(N) (1+4*N) / TXBUF (2+4*N) / RXBUF (3+4*N) */
 #define W5500_BSB_COMMON    0x00u
-#define W5500_BSB_S0_REG    0x01u
-#define W5500_BSB_S0_TX     0x09u
-#define W5500_BSB_S0_RX     0x11u
+#define W5500_BSB_S0_REG    0x01u       /* 1 + 4*0 */
+#define W5500_BSB_S0_TX     0x02u       /* 2 + 4*0 */
+#define W5500_BSB_S0_RX     0x03u       /* 3 + 4*0 */
 
 /* 常用寄存器（common 块） */
 #define W5500_MR            0x0000u     /* 模式：bit7 = 软复位 */
