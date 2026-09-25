@@ -675,7 +675,7 @@
                             
               <Undefine />
                             
-              <IncludePath>../Core/Inc; ../Drivers/STM32H7xx_HAL_Driver/Inc; ../Drivers/STM32H7xx_HAL_Driver/Inc/Legacy; ../Drivers/CMSIS/Device/ST/STM32H7xx/Include; ../Drivers/CMSIS/Include; ../FATFS/Target; ../FATFS/App; ../Middlewares/Third_Party/FatFs/src; ../Drivers/BSP/ili9341; ../Drivers/BSP/lcd_font; ../Drivers/BSP/lcd_ui; ../Drivers/BSP/xpt2046; ../Drivers/BSP/w5500; ../Drivers/BSP/ds18b20</IncludePath>
+              <IncludePath>../Core/Inc; ../Drivers/STM32H7xx_HAL_Driver/Inc; ../Drivers/STM32H7xx_HAL_Driver/Inc/Legacy; ../Drivers/CMSIS/Device/ST/STM32H7xx/Include; ../Drivers/CMSIS/Include; ../FATFS/Target; ../FATFS/App; ../Middlewares/Third_Party/FatFs/src; ../Drivers/BSP/ili9341; ../Drivers/BSP/lcd_font; ../Drivers/BSP/lcd_ui; ../Drivers/BSP/xpt2046; ../Drivers/BSP/w5500; ../Drivers/BSP/ds18b20;../Drivers/BSP/common;../Drivers/BSP/i2c_bus</IncludePath>
                           
             </VariousControls>
                       
@@ -2049,6 +2049,36 @@
         </Group>
                 
         
+        <Group>
+          <GroupName>BSP/common</GroupName>
+          <Files>
+            <File>
+              <FileName>bsp_log.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Drivers\BSP\common\bsp_log.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_log.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Drivers\BSP\common\bsp_log.h</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>BSP/i2c_bus</GroupName>
+          <Files>
+            <File>
+              <FileName>i2c_bus.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Drivers\BSP\i2c_bus\i2c_bus.c</FilePath>
+            </File>
+            <File>
+              <FileName>i2c_bus.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Drivers\BSP\i2c_bus\i2c_bus.h</FilePath>
+            </File>
+          </Files>
+        </Group>
         <Group>
           <GroupName>Startup</GroupName>
           <Files>

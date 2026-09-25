@@ -17,7 +17,6 @@
 #define DS18B20_DQ_PORT     GPIOC
 #define DS18B20_DQ_PIN      GPIO_PIN_13
 
-void    ds18b20_set_log(void (*log)(const char *s));   /* 传 uart_puts 即可 */
 uint8_t ds18b20_init(void);                            /* 0 = 复位脉冲后有器件应答 */
 uint8_t ds18b20_read_rom(uint8_t rom[8]);              /* 0 = 读到 8 字节 ROM 且 CRC 对 */
 uint8_t ds18b20_read_temp(int16_t *raw);               /* 0 = 读到 12 位原始值（1/16 °C） */

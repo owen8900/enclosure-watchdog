@@ -21,6 +21,8 @@
 #include "main.h"
 #include "fatfs.h"
 #include "i2c.h"
+#include "bsp_log.h"
+#include "i2c_bus.h"
 #include "sdmmc.h"
 #include "spi.h"
 #include "usart.h"
@@ -291,6 +293,7 @@ static void ui_refresh(uint32_t cycle, uint32_t spi_err, uint8_t sd_ok)
 #define TICK_UI_MS      10000u      /* 面板刷新（原来是每 10 轮，约 9 秒一次） */
 #define TICK_W5500_MS    5000u      /* W5500 状态监视：原始读帧诊断，5 秒一行 */
 #define TICK_DS18B20_MS  2000u      /* DS18B20 读数打印周期 */
+#define TICK_I2C_MS      3000u      /* I2C 总线扫描周期 */
 
 #define TOUCH_STATUS_Y    304u      /* 触摸状态行占用屏幕最底下 16 像素 */
 #define TOUCH_MARK_COLOR  ILI9341_RED
@@ -514,6 +517,7 @@ int main(void)
   MX_SPI2_Init();
   MX_I2C2_Init();
   /* USER CODE BEGIN 2 */
+  bsp_log_set(uart_puts);
     /* M1：上电自检（USART1，板载 CH340C） */
     uart_puts("\r\n\r\n");
     uart_puts("========================================\r\n");
@@ -609,7 +613,6 @@ int main(void)
     /* M8：W5500 自检。先只读版本寄存器 —— 读到 0x04 就说明 SPI 三线、
      * 片选、供电全对，不用急着联网。 */
     {
-        w5500_set_log(uart_puts);
         uart_puts("W5500      : ");
         if (w5500_init() == 0)
         {
@@ -689,8 +692,13 @@ int main(void)
     /* M10：DS18B20 自检（PC13 = 板载单线座）。PC13 由驱动自己配成开漏输出，
      * 判据：串口打出 ROM=28 开头和一条合理的温度 */
     {
-        ds18b20_set_log(uart_puts);
         ds18b20_selftest();
+    }
+
+    /* M11：I2C2 总线扫描（PB10=SCL / PB11=SDA，走 P2 座的丝印 SCL/SDA）。
+     * 判据：插一只报一只，主循环里继续扫，插拔随时看得见 */
+    {
+        i2c_bus_selftest();
     }
 
     /* M3：SD 卡 + FATFS
@@ -875,6 +883,7 @@ int main(void)
   uint32_t t_w5     = HAL_GetTick();
   uint32_t t_udp    = HAL_GetTick();
   uint32_t t_ds     = HAL_GetTick();
+  uint32_t t_i2c    = HAL_GetTick();
   uint8_t  led_step = 0u;
 
   /* USER CODE END 2 */
@@ -932,6 +941,13 @@ int main(void)
     {
         t_ds = now;
         ds18b20_poll();
+    }
+
+    /* I2C2：总线上器件有增删才打印 */
+    if ((now - t_i2c) >= TICK_I2C_MS)
+    {
+        t_i2c = now;
+        i2c_bus_poll();
     }
 
     /* 心跳：串口一行 + 追加进 SD 日志 */

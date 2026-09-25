@@ -10,6 +10,7 @@
 #include "w5500.h"
 #include "spi.h"
 #include "xpt2046.h"
+#include "bsp_log.h"
 #include <string.h>
 
 /* Plan A 的硬前提：PB14 得是 SPI2_MISO，而它原来被触摸时钟占着。
@@ -287,21 +288,6 @@ uint8_t w5500_bitbang_read8(uint16_t addr, uint8_t bsb)
  * 发 SEND/RECV 命令后必须等 Sn_CR 被芯片清零。
  * --------------------------------------------------------------- */
 
-static void (*s_log)(const char *) = 0;
-
-void w5500_set_log(void (*log)(const char *s))
-{
-    s_log = log;
-}
-
-static void w_log(const char *s)
-{
-    if (s_log != 0)
-    {
-        s_log(s);
-    }
-}
-
 /* socket 的寄存器块选择位：REG = 1+4n、TX = 2+4n、RX = 3+4n（官方 w5500.h 的编码） */
 static uint8_t w5500_bsb_reg(uint8_t s) { return (uint8_t)(0x01u + 4u * s); }
 static uint8_t w5500_bsb_tx(uint8_t s)  { return (uint8_t)(0x02u + 4u * s); }
@@ -534,30 +520,6 @@ uint16_t w5500_udp_recv(uint8_t s, uint8_t *buf, uint16_t max,
 }
 
 /* 日志里打数字：串口打印只走 ASCII，不引 printf */
-static void w_log_u32(uint32_t v)
-{
-    char t[10];
-    char c[2];
-    int  i = 0;
-
-    if (v == 0u)
-    {
-        w_log("0");
-        return;
-    }
-    while (v > 0u && i < 10)
-    {
-        t[i++] = (char)('0' + (char)(v % 10u));
-        v /= 10u;
-    }
-    c[1] = 0;
-    while (i > 0)
-    {
-        c[0] = t[--i];
-        w_log(c);
-    }
-}
-
 /* 拼 "CG UDP heartbeat N\r\n"，不用 printf */
 static uint16_t build_heartbeat(uint8_t *buf, uint16_t seq)
 {
@@ -597,59 +559,28 @@ uint8_t w5500_net_up(void)
 
     if (rc != 0u)
     {
-        w_log("net cfg ERR ");
-        w_log_u32((uint32_t)rc);        /* 1=写失败 2=IP 读回不符 3=MAC 读回不符 */
-        w_log("\r\n");
+        bsp_log("net cfg ERR ");
+        bsp_log_u32((uint32_t)rc);        /* 1=写失败 2=IP 读回不符 3=MAC 读回不符 */
+        bsp_log("\r\n");
         return 1u;
     }
-    w_log("net cfg OK\r\n");
-    w_log((w5500_link_up() != 0u) ? "link up\r\n" : "link down, check cable\r\n");
+    bsp_log("net cfg OK\r\n");
+    bsp_log((w5500_link_up() != 0u) ? "link up\r\n" : "link down, check cable\r\n");
 
     rc = w5500_udp_open(0u, W5500_CFG_LOCAL_PORT);
     if (rc != 0u)
     {
-        w_log("udp open ERR ");
-        w_log_u32((uint32_t)rc);        /* 3 = Sn_SR 不是 0x22 */
-        w_log("\r\n");
+        bsp_log("udp open ERR ");
+        bsp_log_u32((uint32_t)rc);        /* 3 = Sn_SR 不是 0x22 */
+        bsp_log("\r\n");
         return 2u;
     }
-    w_log("udp open OK  port 5000\r\n");
+    bsp_log("udp open OK  port 5000\r\n");
 
     return 0u;
 }
 
-static void w_log_hex2(uint8_t v)
-{
-    static const char hx[] = "0123456789ABCDEF";
-    char c[2];
-
-    c[1] = 0;
-    c[0] = hx[(v >> 4) & 0x0Fu];
-    w_log(c);
-    c[0] = hx[v & 0x0Fu];
-    w_log(c);
-}
-
 /* 收到的内容可能是任意字节，非可打印的打成点，免得串口乱码 */
-static void w_log_ascii(const uint8_t *buf, uint16_t n)
-{
-    char c[2];
-    uint16_t i;
-
-    c[1] = 0;
-    for (i = 0u; i < n; i++)
-    {
-        uint8_t b = buf[i];
-
-        if ((b == (uint8_t)'\r') || (b == (uint8_t)'\n'))
-        {
-            continue;
-        }
-        c[0] = ((b >= 0x20u) && (b < 0x7Fu)) ? (char)b : '.';
-        w_log(c);
-    }
-}
-
 /* 收一包：打印来源和内容，再原样回一个。没数据立刻返回，主循环里随便调 */
 void w5500_udp_poll(void)
 {
@@ -664,21 +595,21 @@ void w5500_udp_poll(void)
         return;
     }
 
-    w_log("udp recv ");
-    w_log_u32((uint32_t)n);
-    w_log(" B from ");
-    w_log_u32((uint32_t)from[0]);
-    w_log(".");
-    w_log_u32((uint32_t)from[1]);
-    w_log(".");
-    w_log_u32((uint32_t)from[2]);
-    w_log(".");
-    w_log_u32((uint32_t)from[3]);
-    w_log(":");
-    w_log_u32((uint32_t)from_port);
-    w_log("  [");
-    w_log_ascii(rx, n);
-    w_log("]\r\n");
+    bsp_log("udp recv ");
+    bsp_log_u32((uint32_t)n);
+    bsp_log(" B from ");
+    bsp_log_u32((uint32_t)from[0]);
+    bsp_log(".");
+    bsp_log_u32((uint32_t)from[1]);
+    bsp_log(".");
+    bsp_log_u32((uint32_t)from[2]);
+    bsp_log(".");
+    bsp_log_u32((uint32_t)from[3]);
+    bsp_log(":");
+    bsp_log_u32((uint32_t)from_port);
+    bsp_log("  [");
+    bsp_log_ascii(rx, n);
+    bsp_log("]\r\n");
 
     (void)w5500_udp_send(0u, from, from_port, rx, n);   /* 原样回一个，PC 上能看到闭环 */
 }
@@ -701,16 +632,16 @@ void w5500_udp_send_heartbeat(void)
     {
         if (failing == 0u)
         {
-            w_log("udp send ERR ");
-            w_log_u32((uint32_t)rc);    /* 7 = ARP 超时：PC 的 IP 或网段不对 */
-            w_log("\r\n");
+            bsp_log("udp send ERR ");
+            bsp_log_u32((uint32_t)rc);    /* 7 = ARP 超时：PC 的 IP 或网段不对 */
+            bsp_log("\r\n");
         }
         failing = 1u;
     }
     else if (failing != 0u)
     {
         failing = 0u;
-        w_log("udp send OK again\r\n");
+        bsp_log("udp send OK again\r\n");
     }
 }
 
@@ -727,31 +658,31 @@ void w5500_watch_dump(void)
     (void)w5500_read(W5500_RTR, W5500_BSB_COMMON, rb, 2u);
     rtr = (uint16_t)(((uint16_t)rb[0] << 8) | (uint16_t)rb[1]);
 
-    w_log("W5500 watch: frame=");
+    bsp_log("W5500 watch: frame=");
     for (i = 0u; i < 4u; i++)
     {
-        w_log_hex2(p[i]);
-        w_log(" ");
+        bsp_log_hex2(p[i]);
+        bsp_log(" ");
     }
-    w_log(" VERSIONR=0x");
-    w_log_hex2(w5500_read8(W5500_VERSIONR, W5500_BSB_COMMON));
-    w_log(" RTR=0x");
-    w_log_hex2((uint8_t)(rtr >> 8));
-    w_log_hex2((uint8_t)(rtr & 0xFFu));
-    w_log(" sr0=0x");
-    w_log_hex2(w5500_socket_sr(0u));
-    w_log(" rsr=0x");
+    bsp_log(" VERSIONR=0x");
+    bsp_log_hex2(w5500_read8(W5500_VERSIONR, W5500_BSB_COMMON));
+    bsp_log(" RTR=0x");
+    bsp_log_hex2((uint8_t)(rtr >> 8));
+    bsp_log_hex2((uint8_t)(rtr & 0xFFu));
+    bsp_log(" sr0=0x");
+    bsp_log_hex2(w5500_socket_sr(0u));
+    bsp_log(" rsr=0x");
     {
         uint16_t rsr = sn_read16(0u, W5500_SN_RX_RSR);
 
-        w_log_hex2((uint8_t)(rsr >> 8));
-        w_log_hex2((uint8_t)(rsr & 0xFFu));
+        bsp_log_hex2((uint8_t)(rsr >> 8));
+        bsp_log_hex2((uint8_t)(rsr & 0xFFu));
     }
-    w_log(" rxerr=");
-    w_log_u32(s_rxerr);
-    w_log(" err=");
-    w_log_u32(w5500_error_count());
-    w_log("\r\n");
+    bsp_log(" rxerr=");
+    bsp_log_u32(s_rxerr);
+    bsp_log(" err=");
+    bsp_log_u32(w5500_error_count());
+    bsp_log("\r\n");
 }
 
 uint8_t w5500_init(void)

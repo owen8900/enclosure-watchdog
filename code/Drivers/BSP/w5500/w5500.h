@@ -98,7 +98,6 @@ uint8_t  w5500_write(uint16_t addr, uint8_t bsb, const uint8_t *buf, uint16_t le
 uint8_t  w5500_read8(uint16_t addr, uint8_t bsb);
 void     w5500_write8(uint16_t addr, uint8_t bsb, uint8_t val);
 
-void     w5500_set_log(void (*log)(const char *s));   /* 自检日志，传 uart_puts 即可 */
 uint8_t  w5500_net_setup(void);                        /* 0 = 写参数并读回校验通过 */
 uint8_t  w5500_udp_open(uint8_t s, uint16_t port);     /* 0 = 开好后 Sn_SR 是 UDP */
 uint8_t  w5500_udp_send(uint8_t s, const uint8_t dip[4], uint16_t dport,

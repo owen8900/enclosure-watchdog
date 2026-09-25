@@ -9,6 +9,7 @@
   */
 
 #include "ds18b20.h"
+#include "bsp_log.h"
 
 #define OW_CMD_SKIP_ROM     0xCCu
 #define OW_CMD_READ_ROM     0x33u
@@ -22,79 +23,7 @@ static uint32_t s_ticks_per_us = 480u;  /* 标定前先按 480MHz 兜底 */
 static uint8_t  s_dwt_ok;               /* DWT 计数器真的在走才用精确延时 */
 static uint8_t  s_fail_shown;
 
-void ds18b20_set_log(void (*log)(const char *s))
-{
-    s_log = log;
-}
-
-static void w_log(const char *s)
-{
-    if (s_log != 0)
-    {
-        s_log(s);
-    }
-}
-
-static void w_log_u32(uint32_t v)
-{
-    char t[10];
-    char c[2];
-    int  i = 0;
-
-    if (v == 0u)
-    {
-        w_log("0");
-        return;
-    }
-    while (v > 0u && i < 10)
-    {
-        t[i++] = (char)('0' + (char)(v % 10u));
-        v /= 10u;
-    }
-    c[1] = 0;
-    while (i > 0)
-    {
-        c[0] = t[--i];
-        w_log(c);
-    }
-}
-
-static void w_log_hex2(uint8_t v)
-{
-    static const char hx[] = "0123456789ABCDEF";
-    char c[2];
-
-    c[1] = 0;
-    c[0] = hx[(v >> 4) & 0x0Fu];
-    w_log(c);
-    c[0] = hx[v & 0x0Fu];
-    w_log(c);
-}
-
 /* 千分之一摄氏度打印成 25.625 这样的形式，串口字符串保持 ASCII */
-static void w_log_milli(int32_t milli)
-{
-    uint32_t v;
-    uint32_t frac;
-
-    if (milli < 0)
-    {
-        w_log("-");
-        v = (uint32_t)(-milli);
-    }
-    else
-    {
-        v = (uint32_t)milli;
-    }
-
-    w_log_u32(v / 1000u);
-    w_log(".");
-    frac = v % 1000u;
-    w_log_u32(frac / 100u);
-    w_log_u32((frac / 10u) % 10u);
-    w_log_u32(frac % 10u);
-}
-
 /* DWT 周期计数器当微秒尺子。拿 HAL 的 1ms 时基标定，不读 SystemCoreClock */
 static void dly_init(void)
 {
@@ -368,39 +297,39 @@ void ds18b20_selftest(void)
 
     if (ds18b20_init() != 0u)
     {
-        w_log("DS18B20: no answer on the bus (DQ=PC13, check plug)\r\n");
+        bsp_log("DS18B20: no answer on the bus (DQ=PC13, check plug)\r\n");
         return;
     }
-    w_log("DS18B20: device present\r\n");
+    bsp_log("DS18B20: device present\r\n");
 
     rc = ds18b20_read_rom(rom);
-    w_log("DS18B20: ROM=");
+    bsp_log("DS18B20: ROM=");
     for (i = 0u; i < 8u; i++)
     {
-        w_log_hex2(rom[i]);
+        bsp_log_hex2(rom[i]);
     }
     if (rc == 1u)
     {
-        w_log("  (no presence pulse)\r\n");
+        bsp_log("  (no presence pulse)\r\n");
     }
     else if (rc == 2u)
     {
-        w_log("  (CRC ERR)\r\n");
+        bsp_log("  (CRC ERR)\r\n");
     }
     else
     {
-        w_log((rom[0] == 0x28u) ? "  (DS18B20)\r\n" : "  (first byte is not 0x28)\r\n");
+        bsp_log((rom[0] == 0x28u) ? "  (DS18B20)\r\n" : "  (first byte is not 0x28)\r\n");
     }
 
     /* ROM 认不出也继续测温：总线上只有一只时测温走 SKIP_ROM，不依赖 ROM */
     if (ds18b20_read_temp(&raw) != 0u)
     {
-        w_log("DS18B20: read temp ERR\r\n");
+        bsp_log("DS18B20: read temp ERR\r\n");
         return;
     }
-    w_log("DS18B20: T=");
-    w_log_milli(ds18b20_raw_to_milli(raw));
-    w_log(" C\r\n");
+    bsp_log("DS18B20: T=");
+    bsp_log_milli(ds18b20_raw_to_milli(raw));
+    bsp_log(" C\r\n");
 }
 
 /* 主循环里周期调用。读失败只报一次，免得线掉了把串口刷满 */
@@ -413,13 +342,13 @@ void ds18b20_poll(void)
         if (s_fail_shown == 0u)
         {
             s_fail_shown = 1u;
-            w_log("DS18B20: read ERR (bus lost?)\r\n");
+            bsp_log("DS18B20: read ERR (bus lost?)\r\n");
         }
         return;
     }
 
     s_fail_shown = 0u;
-    w_log("DS18B20: T=");
-    w_log_milli(ds18b20_raw_to_milli(raw));
-    w_log(" C\r\n");
+    bsp_log("DS18B20: T=");
+    bsp_log_milli(ds18b20_raw_to_milli(raw));
+    bsp_log(" C\r\n");
 }
