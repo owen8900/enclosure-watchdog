@@ -32,6 +32,7 @@
 #include "lcd_ui.h"
 #include "xpt2046.h"
 #include "w5500.h"
+#include "ds18b20.h"
 
 /* USER CODE END Includes */
 
@@ -293,6 +294,7 @@ static void ui_refresh(uint32_t cycle, uint32_t spi_err, uint8_t sd_ok)
 #define TICK_HB_MS       1000u      /* 心跳：串口一行 + 追加进 SD 日志 */
 #define TICK_UI_MS      10000u      /* 面板刷新（原来是每 10 轮，约 9 秒一次） */
 #define TICK_W5500_MS    5000u      /* W5500 状态监视：原始读帧诊断，5 秒一行 */
+#define TICK_DS18B20_MS  2000u      /* DS18B20 读数打印周期 */
 
 #define TOUCH_STATUS_Y    304u      /* 触摸状态行占用屏幕最底下 16 像素 */
 #define TOUCH_MARK_COLOR  ILI9341_RED
@@ -680,6 +682,13 @@ int main(void)
     }
 #endif
 
+    /* M10：DS18B20 自检（PC13 = 板载单线座）。PC13 由驱动自己配成开漏输出，
+     * 判据：串口打出 ROM=28 开头和一条合理的温度 */
+    {
+        ds18b20_set_log(uart_puts);
+        ds18b20_selftest();
+    }
+
     /* M3：SD 卡 + FATFS
      * 顺序有讲究：CubeMX 使能 FATFS 后，不再由 sdmmc.c 初始化卡，改由 FATFS 的
      * BSP_SD_Init() 在首次 f_mount 时识别，所以卡信息必须挂载之后再读 ——
@@ -862,6 +871,7 @@ int main(void)
   uint32_t t_ui     = HAL_GetTick();
   uint32_t t_w5     = HAL_GetTick();
   uint32_t t_udp    = HAL_GetTick();
+  uint32_t t_ds     = HAL_GetTick();
   uint8_t  led_step = 0u;
 
   /* Infinite loop */
@@ -904,11 +914,18 @@ int main(void)
     }
 #endif
 
-    /* W5500 监视：每 5 秒一行原始读帧，查"初始化能读、进主循环读回 0" */
+    /* W5500 监视：每 5 秒一行原始读帧，查「初始化能读、进主循环读回 0」这种现象 */
     if ((now - t_w5) >= TICK_W5500_MS)
     {
         t_w5 = now;
         w5500_watch_dump();
+    }
+
+    /* DS18B20：按周期读一次并打印温度 */
+    if ((now - t_ds) >= TICK_DS18B20_MS)
+    {
+        t_ds = now;
+        ds18b20_poll();
     }
 
     /* 心跳：串口一行 + 追加进 SD 日志 */
