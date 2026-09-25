@@ -297,7 +297,10 @@ static uint8_t read_rom_once(uint8_t rom[8])
         rom[i] = ow_read_byte();
     }
 
-    return (ow_crc8(rom, 8u) == rom[7]) ? 0u : 2u;
+    /* 对含 CRC 字节在内的 8 字节算 CRC，结果应为 0（残差形式）。
+     * 踩过：这里原来写成 == rom[7]，等于要求「残差等于它自己」，恒不成立，
+     * 于是 ROM 每次都被判 CRC 错（温度那条用的是残差式，所以没暴露）。 */
+    return (ow_crc8(rom, 8u) == 0u) ? 0u : 2u;
 }
 
 /* 上电后第一次访问偶发失败过（温度读得好好的、ROM 却 CRC 不过），所以再试一次 */
