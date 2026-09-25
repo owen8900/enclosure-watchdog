@@ -20,6 +20,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "fatfs.h"
+#include "i2c.h"
 #include "sdmmc.h"
 #include "spi.h"
 #include "usart.h"
@@ -280,12 +281,7 @@ static void ui_refresh(uint32_t cycle, uint32_t spi_err, uint8_t sd_ok)
     lcd_ui_update(&s_ui);
 }
 
-/* USER CODE END 0 */
 
-/**
-  * @brief  The application entry point.
-  * @retval int
-  */
 /* M7：触摸轮询与画点 */
 
 /* 各动作周期，时间片调度互不阻塞 */
@@ -481,6 +477,13 @@ static void touch_marker_tick(void)
     }
 }
 
+/* USER CODE END 0 */
+
+/**
+  * @brief  The application entry point.
+  * @retval int
+  */
+
 int main(void)
 {
   /* USER CODE BEGIN 1 */
@@ -509,6 +512,7 @@ int main(void)
   MX_SDMMC1_SD_Init();
   MX_FATFS_Init();
   MX_SPI2_Init();
+  MX_I2C2_Init();
   /* USER CODE BEGIN 2 */
     /* M1：上电自检（USART1，板载 CH340C） */
     uart_puts("\r\n\r\n");
@@ -861,7 +865,6 @@ int main(void)
     }
 
 
-  /* USER CODE END 2 */
 
   /* M2/M7 时间片主循环的节拍。原来整轮用 HAL_Delay 串起来（光 RGB 三色就 0.9 秒），
      触摸扫描夹在里面会漏按。 */
@@ -873,6 +876,9 @@ int main(void)
   uint32_t t_udp    = HAL_GetTick();
   uint32_t t_ds     = HAL_GetTick();
   uint8_t  led_step = 0u;
+
+  /* USER CODE END 2 */
+
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
