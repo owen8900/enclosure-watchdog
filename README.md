@@ -1,15 +1,25 @@
 # Cabinet Guardian
 
+![license](https://img.shields.io/badge/license-MIT-2ea44f?style=flat-square)
+![MCU](https://img.shields.io/badge/MCU-STM32H750VB-03234B?style=flat-square)
+![core](https://img.shields.io/badge/core-Cortex--M7%20%40480MHz-03234B?style=flat-square)
+![toolchain](https://img.shields.io/badge/toolchain-Keil%20MDK%20AC6%20%2B%20CubeMX-1f6feb?style=flat-square)
+![language](https://img.shields.io/badge/language-C-555555?style=flat-square)
+![tests](https://img.shields.io/badge/PC%20algorithm%20tests-11%20passed-2ea44f?style=flat-square)
+
+仓库：[Gitee](https://gitee.com/owen8900/guardian-of-control-cabinets) ｜ [GitHub](https://github.com/owen8900/enclosure-watchdog)
+
 控制柜状态监测与故障诊断系统。以 STM32H750 为边缘节点，采集柜内温度、
 加热回路电流和加热输出占空比，在本地完成故障识别和分级告警，
 通过 Modbus TCP / MQTT 对上位机通信。
 
-当前状态：开发板已到位（正点原子 MiniPro STM32H750 V1.5），固件在板上跑通到 P0b。
+当前状态：开发板已到位（正点原子 MiniPro STM32H750 V1.5），P0a / P0b 完成，P1 走完前半程。
 已完成并实板验证：工具链（MDK + SWD 调试）、串口、GPIO、SD 卡（SDMMC1 四位 + FatFs）、
-心跳日志追加写入；算法层在 PC 上通过 11 项验证。
-下一步：ILI9341 SPI 屏驱动，随后 QSPI 启动与字库写入。
+心跳日志追加写入、ILI9341 SPI 屏与 XPT2046 触摸、W5500 以太网（UDP 双向）、DS18B20 温度；
+算法层在 PC 上通过 11 项验证（`bash code/pc_test/build_run.sh`）。
+下一步：I2C 传感器（SHT30×2 + INA219）联调，随后接进算法层、告警上报帧与上位机指令。
 
-固件占用：Flash 27.5 KB / 128 KB，RAM 3.6 KB。
+固件占用：Flash 38.3 KB / 128 KB（映像 39260 字节），RAM 3.7 KB（RW + ZI 3736 字节）。
 
 ![系统架构图](images/系统架构图.png)
 
