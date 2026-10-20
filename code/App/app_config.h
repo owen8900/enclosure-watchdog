@@ -21,10 +21,10 @@
 #define CFG_T_DRIFT_C           5.0f    /* 判据4：双探头温差阈值 */
 
 /* 判据5：一阶热模型残差法。残差 = 实测温升速率 - ( P - k·(T - Tamb) ) / C，
- * 超限即判散热通道异常。C 与 k 靠实测辨识：给恒定功率、拟合温度曲线
+ * 超限即判散热通道异常。C 与 k 的辨识方法：给恒定功率、记录温度曲线、拟合
  */
-#define CFG_THERM_C_J_PER_K      9.00f   /* 负载热容（实测辨识） J/K */
-#define CFG_THERM_K_W_PER_K      0.080f  /* 散热系数（实测辨识） W/K */
+#define CFG_THERM_C_J_PER_K      9.00f   /* 负载热容（初值估算，功率级接上后辨识） J/K */
+#define CFG_THERM_K_W_PER_K      0.080f  /* 散热系数（初值估算，功率级接上后辨识） W/K */
 #define CFG_HEATER_PMAX_W        10.0f   /* 加热功率上限 W */
 #define CFG_RESIDUAL_ABN_C_PER_S 0.50f   /* 温升速率残差阈值 °C/s */
 
