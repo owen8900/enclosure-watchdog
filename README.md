@@ -13,11 +13,13 @@
 加热回路电流和加热输出占空比，在本地完成故障识别和分级告警，
 通过 Modbus TCP / MQTT 对上位机通信。
 
-当前状态：开发板已到位（正点原子 MiniPro STM32H750 V1.5），P0a / P0b 完成，P1 走完前半程。
+当前状态：开发板已到位（正点原子 MiniPro STM32H750 V1.5），P0a / P0b 完成，P1 走完四分之三。
 已完成并实板验证：工具链（MDK + SWD 调试）、串口、GPIO、SD 卡（SDMMC1 四位 + FatFs）、
-心跳日志追加写入、ILI9341 SPI 屏与 XPT2046 触摸、W5500 以太网（UDP 双向）、DS18B20 温度；
-算法层在 PC 上通过 11 项验证（`bash code/pc_test/build_run.sh`）。
-下一步：I2C 传感器（SHT30×2 + INA219）联调，随后接进算法层、告警上报帧与上位机指令。
+心跳日志追加写入、ILI9341 SPI 屏与 XPT2046 触摸、W5500 以太网（UDP 双向）、DS18B20 温度、
+SHT30 温湿度（单次测量 + 双 CRC8，实测 T=27.6 ℃ / RH=54 %）；
+算法层（滤波 / 告警状态机 / 多源诊断 / 加热控制）在 PC 上通过 11 项验证，
+运行 `bash code/pc_test/build_run.sh` 可复现。
+下一步：SHT30 #2 与 INA219 接入，随后接进算法层，再进 FreeRTOS 任务化。
 
 固件占用：Flash 38.3 KB / 128 KB（映像 39260 字节），RAM 3.7 KB（RW + ZI 3736 字节）。
 
