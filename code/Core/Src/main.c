@@ -23,6 +23,7 @@
 #include "i2c.h"
 #include "bsp_log.h"
 #include "i2c_bus.h"
+#include "sht30.h"
 #include "sdmmc.h"
 #include "spi.h"
 #include "usart.h"
@@ -294,6 +295,7 @@ static void ui_refresh(uint32_t cycle, uint32_t spi_err, uint8_t sd_ok)
 #define TICK_W5500_MS    5000u      /* W5500 状态监视：原始读帧诊断，5 秒一行 */
 #define TICK_DS18B20_MS  2000u      /* DS18B20 读数打印周期 */
 #define TICK_I2C_MS      3000u      /* I2C 总线扫描周期 */
+#define TICK_SHT30_MS    2000u      /* SHT30 读数打印周期 */
 
 #define TOUCH_STATUS_Y    304u      /* 触摸状态行占用屏幕最底下 16 像素 */
 #define TOUCH_MARK_COLOR  ILI9341_RED
@@ -701,6 +703,12 @@ int main(void)
         i2c_bus_selftest();
     }
 
+    /* M12：SHT30 自检，两个地址各读一次。
+     * 判据：0x44 打出一行 T= / RH= 就说明地址对、驱动通；rc 非 0 见 sht30.c 的返回码 */
+    {
+        sht30_selftest();
+    }
+
     /* M3：SD 卡 + FATFS
      * 顺序有讲究：CubeMX 使能 FATFS 后，不再由 sdmmc.c 初始化卡，改由 FATFS 的
      * BSP_SD_Init() 在首次 f_mount 时识别，所以卡信息必须挂载之后再读 ——
@@ -884,6 +892,7 @@ int main(void)
   uint32_t t_udp    = HAL_GetTick();
   uint32_t t_ds     = HAL_GetTick();
   uint32_t t_i2c    = HAL_GetTick();
+  uint32_t t_sht    = HAL_GetTick();
   uint8_t  led_step = 0u;
 
   /* USER CODE END 2 */
@@ -948,6 +957,13 @@ int main(void)
     {
         t_i2c = now;
         i2c_bus_poll();
+    }
+
+    /* SHT30：按周期读两个地址 */
+    if ((now - t_sht) >= TICK_SHT30_MS)
+    {
+        t_sht = now;
+        sht30_poll();
     }
 
     /* 心跳：串口一行 + 追加进 SD 日志 */

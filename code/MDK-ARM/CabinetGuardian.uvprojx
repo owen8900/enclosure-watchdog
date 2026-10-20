@@ -675,7 +675,7 @@
                             
               <Undefine />
                             
-              <IncludePath>../Core/Inc; ../Drivers/STM32H7xx_HAL_Driver/Inc; ../Drivers/STM32H7xx_HAL_Driver/Inc/Legacy; ../Drivers/CMSIS/Device/ST/STM32H7xx/Include; ../Drivers/CMSIS/Include; ../FATFS/Target; ../FATFS/App; ../Middlewares/Third_Party/FatFs/src; ../Drivers/BSP/ili9341; ../Drivers/BSP/lcd_font; ../Drivers/BSP/lcd_ui; ../Drivers/BSP/xpt2046; ../Drivers/BSP/w5500; ../Drivers/BSP/ds18b20;../Drivers/BSP/common;../Drivers/BSP/i2c_bus</IncludePath>
+              <IncludePath>../Core/Inc; ../Drivers/STM32H7xx_HAL_Driver/Inc; ../Drivers/STM32H7xx_HAL_Driver/Inc/Legacy; ../Drivers/CMSIS/Device/ST/STM32H7xx/Include; ../Drivers/CMSIS/Include; ../FATFS/Target; ../FATFS/App; ../Middlewares/Third_Party/FatFs/src; ../Drivers/BSP/ili9341; ../Drivers/BSP/lcd_font; ../Drivers/BSP/lcd_ui; ../Drivers/BSP/xpt2046; ../Drivers/BSP/w5500; ../Drivers/BSP/ds18b20;../Drivers/BSP/common;../Drivers/BSP/i2c_bus;../Drivers/BSP/sht30</IncludePath>
                           
             </VariousControls>
                       
@@ -2076,6 +2076,21 @@
               <FileName>i2c_bus.h</FileName>
               <FileType>5</FileType>
               <FilePath>..\Drivers\BSP\i2c_bus\i2c_bus.h</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>BSP/sht30</GroupName>
+          <Files>
+            <File>
+              <FileName>sht30.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Drivers\BSP\sht30\sht30.c</FilePath>
+            </File>
+            <File>
+              <FileName>sht30.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Drivers\BSP\sht30\sht30.h</FilePath>
             </File>
           </Files>
         </Group>

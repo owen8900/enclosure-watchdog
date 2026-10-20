@@ -36,7 +36,8 @@ CRLF = "\r\n"
 # 写在 USER CODE 区里的关键代码，少一个就说明又被 CubeMX 吞了
 LANDMARKS = ["touch_marker_tick", "touch_poll", "ui_refresh", "w5500_net_up",
              "w5500_watch_dump", "ds18b20_selftest", "ds18b20_poll",
-             "i2c_bus_selftest", "i2c_bus_poll", "bsp_log_set"]
+             "i2c_bus_selftest", "i2c_bus_poll",
+             "sht30_selftest", "sht30_poll", "bsp_log_set"]
 
 failures = []
 
